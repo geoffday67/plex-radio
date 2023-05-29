@@ -1,0 +1,18 @@
+{
+	"folders": [
+    {
+      "path": "Firebeetle"
+    },
+    {
+      "name": "ESP8266",
+      "path": "ESP8266"
+    }
+  ],
+  "settings": {
+    "files.associations": {
+      "*.tcc": "cpp",
+      "fstream": "cpp",
+      "*.plg": "cpp"
+    }
+  }
+}

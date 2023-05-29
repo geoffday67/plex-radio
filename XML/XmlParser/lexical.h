@@ -31,6 +31,7 @@ public:
   static const int STOP_TAG = -3;
   static const int WHITESPACE = -4;
   static const int ATTRIBUTE_SEPARATOR = -5;
+  static const int START_HEADER = -6;
 
   bool valueOnly = false;
   LexicalParser();

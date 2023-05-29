@@ -2,8 +2,8 @@
 
 #include "lexical.h"
 
-typedef void (*XmlCallback)(char const*, char const*);
-typedef void (*CharCallback)(char const*, const char);
+typedef void (*XmlCallback)(char*, char*);
+typedef void (*CharCallback)(char*, char);
 
 class EntityParser {
 private:
@@ -18,7 +18,7 @@ private:
   void handleEntity(char);
   
 public:
-  void reset();
+  EntityParser();
   char mapChar(char);
 };
 
@@ -34,10 +34,12 @@ private:
   };
   State state;
 
-  char name[128], value[128], entity[8], *pbuffer, attrName[128], attrValue[128];
-  EntityParser entityParser;
+  char name[256], value[256], entity[8], *pbuffer, attrName[256], attrValue[256];
+  EntityParser *pEntityParser;
   LexicalParser *pLexicalParser;
   XmlParser *pSubParser;
+  XmlCallback xmlCallback;
+  CharCallback charCallback;
   bool ownLexical;
   
   void log(char const*);
@@ -55,12 +57,14 @@ private:
   void startSubParser();
   void endSubParser();
   char *stripNamespace(char*);
+  void init();
 
 public:
   XmlParser();
   XmlParser(LexicalParser*);
   ~XmlParser();
   void processChar(char);
-  XmlCallback xmlCallback;
-  CharCallback charCallback;
+  void setXmlCallback(XmlCallback);
+  void setCharCallback(CharCallback);
+  void reset();
 };

@@ -11,6 +11,9 @@
 
 LexicalParser::LexicalParser() {
   state = State::Idle;
+  tokenCount = 0;
+  tokenIndex = 0;
+  valueOnly = false;
 }
 
 void LexicalParser::setTokens(int count, ...) {
@@ -86,6 +89,8 @@ void LexicalParser::processChar(char c) {
     case State::OpeningTag:
       if (c == '/') {
         setTokens(1, START_CLOSE_TAG);
+      } else if (c == '?') {
+        setTokens(1, START_HEADER);
       } else {
         setTokens(2, START_OPEN_TAG, c);
       }

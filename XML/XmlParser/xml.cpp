@@ -19,11 +19,13 @@ void XmlParser::log(char const* plog) {
 XmlParser::XmlParser() {
   pLexicalParser = new LexicalParser();
   ownLexical = true;
+  init();
 }
 
 XmlParser::XmlParser(LexicalParser *pparser) {
   pLexicalParser = pparser;
   ownLexical = false;
+  init();
 }
 
 XmlParser::~XmlParser() {
@@ -32,14 +34,41 @@ XmlParser::~XmlParser() {
   }
 }
 
+void XmlParser::init() {
+  pSubParser = 0;
+  xmlCallback = 0;
+  charCallback = 0;
+  pEntityParser = new EntityParser;
+  reset();
+}
+
+void XmlParser::reset() {
+  state = State::Idle;
+  pbuffer = 0;
+}
+
+void XmlParser::setXmlCallback(XmlCallback callback) {
+  xmlCallback = callback;
+  if (pSubParser) {
+    pSubParser->setXmlCallback(callback);
+  }
+}
+
+void XmlParser::setCharCallback(CharCallback callback) {
+  charCallback = callback;
+  if (pSubParser) {
+    pSubParser->setCharCallback(callback);
+  }
+}
+
 char *XmlParser::stripNamespace(char* pname) {
-  char *pseparator = strchr(pname, ':');
+  return pname;
+  /*char *pseparator = strchr(pname, ':');
   if (pseparator) {
     return pseparator + 1;
   } else {
     return pname;
-  }
-
+  }*/
 }
 
 void XmlParser::startTagName() {
@@ -71,7 +100,7 @@ void XmlParser::startAttrValue() {
 void XmlParser::endAttrValue() {
   *pbuffer = 0;
   if (xmlCallback && !charCallback) {
-    (*xmlCallback)(attrName, attrValue);
+    (*xmlCallback)(stripNamespace(attrName), attrValue);
   }
 }
 
@@ -83,19 +112,20 @@ void XmlParser::startBody() {
 
 void XmlParser::endBody() {
   *pbuffer = 0;
-  if (xmlCallback/* && !charCallback*/) {
+  if (xmlCallback) {
     (*xmlCallback)(stripNamespace(name), value);
   }
 }
 
 void XmlParser::startSubParser() {
   pSubParser = new XmlParser(pLexicalParser);
-  pSubParser->xmlCallback = xmlCallback;
-  pSubParser->charCallback = charCallback;
+  pSubParser->setXmlCallback(xmlCallback);
+  pSubParser->setCharCallback(charCallback);
 }
 
 void XmlParser::handleCharacter(char c) {
-  char e = entityParser.mapChar(c);
+  char e = pEntityParser->mapChar(c);
+  //printf("Mapped %c to %c\n", c, e);
   if (e) {
     if (charCallback) {
       (*charCallback)(name, e);
@@ -206,7 +236,7 @@ void XmlParser::processChar(char c) {
   }
 }
 
-void EntityParser::reset() {
+EntityParser::EntityParser() {
   state = STATE_IDLE;
 }
 
