@@ -32,6 +32,7 @@ XmlParser::~XmlParser() {
   if (ownLexical) {
     delete pLexicalParser;
   }
+  delete pEntityParser;
 }
 
 void XmlParser::init() {
@@ -39,25 +40,34 @@ void XmlParser::init() {
   xmlCallback = 0;
   charCallback = 0;
   pEntityParser = new EntityParser;
+  pdata = 0;
   reset();
 }
 
 void XmlParser::reset() {
   state = State::Idle;
   pbuffer = 0;
+  charIndex = 0;
 }
 
 void XmlParser::setXmlCallback(XmlCallback callback) {
-  xmlCallback = callback;
+  this->xmlCallback = callback;
   if (pSubParser) {
     pSubParser->setXmlCallback(callback);
   }
 }
 
 void XmlParser::setCharCallback(CharCallback callback) {
-  charCallback = callback;
+  this->charCallback = callback;
   if (pSubParser) {
     pSubParser->setCharCallback(callback);
+  }
+}
+
+void XmlParser::setData(void *pdata) {
+  this->pdata = pdata;
+  if (pSubParser) {
+    pSubParser->setData(pdata);
   }
 }
 
@@ -73,47 +83,51 @@ char *XmlParser::stripNamespace(char* pname) {
 
 void XmlParser::startTagName() {
   pbuffer = name;
+  charIndex = 0;
   state = State::TagName;
 }
 
 void XmlParser::endTagName() {
-  *pbuffer = 0;
+  pbuffer[charIndex] = 0;
   if (xmlCallback && !charCallback) {
-    (*xmlCallback)(stripNamespace(name), 0);
+    (*xmlCallback)(stripNamespace(name), 0, pdata);
   }
 }
 
 void XmlParser::startAttrName() {
   pbuffer = attrName;
+  charIndex = 0;
   state = State::AttrName;
 }
 
 void XmlParser::endAttrName() {
-  *pbuffer = 0;
+  pbuffer[charIndex] = 0;
 }
 
 void XmlParser::startAttrValue() {
   pbuffer = attrValue;
+  charIndex = 0;
   state = State::AttrValue;
 }
 
 void XmlParser::endAttrValue() {
-  *pbuffer = 0;
+  pbuffer[charIndex] = 0;
   if (xmlCallback && !charCallback) {
-    (*xmlCallback)(stripNamespace(attrName), attrValue);
+    (*xmlCallback)(stripNamespace(attrName), attrValue, pdata);
   }
 }
 
 void XmlParser::startBody() {
   pbuffer = value;
+  charIndex = 0;
   pLexicalParser->valueOnly = true;
   state = State::Body;
 }
 
 void XmlParser::endBody() {
-  *pbuffer = 0;
+  pbuffer[charIndex] = 0;
   if (xmlCallback) {
-    (*xmlCallback)(stripNamespace(name), value);
+    (*xmlCallback)(stripNamespace(name), value, pdata);
   }
 }
 
@@ -121,16 +135,16 @@ void XmlParser::startSubParser() {
   pSubParser = new XmlParser(pLexicalParser);
   pSubParser->setXmlCallback(xmlCallback);
   pSubParser->setCharCallback(charCallback);
+  pSubParser->setData(pdata);
 }
 
 void XmlParser::handleCharacter(char c) {
   char e = pEntityParser->mapChar(c);
-  //printf("Mapped %c to %c\n", c, e);
   if (e) {
     if (charCallback) {
-      (*charCallback)(name, e);
-    } else if (pbuffer) {
-      *pbuffer++ = e;
+      (*charCallback)(name, e, pdata);
+    } else if (pbuffer && charIndex < MAX_NAME - 1) {
+      pbuffer[charIndex++] = e;
     }
   }
 }

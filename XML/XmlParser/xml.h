@@ -2,8 +2,10 @@
 
 #include "lexical.h"
 
-typedef void (*XmlCallback)(char*, char*);
-typedef void (*CharCallback)(char*, char);
+#define MAX_NAME  256
+
+typedef void (*XmlCallback)(char*, char*, void*);
+typedef void (*CharCallback)(char*, char, void*);
 
 class EntityParser {
 private:
@@ -34,13 +36,15 @@ private:
   };
   State state;
 
-  char name[256], value[256], entity[8], *pbuffer, attrName[256], attrValue[256];
+  char name[MAX_NAME], value[MAX_NAME], entity[8], *pbuffer, attrName[MAX_NAME], attrValue[MAX_NAME];
   EntityParser *pEntityParser;
   LexicalParser *pLexicalParser;
   XmlParser *pSubParser;
   XmlCallback xmlCallback;
   CharCallback charCallback;
   bool ownLexical;
+  void *pdata;
+  int charIndex;
   
   void log(char const*);
   bool handleLexical(int);  // TRUE => end of tag parsing.
@@ -66,5 +70,6 @@ public:
   void processChar(char);
   void setXmlCallback(XmlCallback);
   void setCharCallback(CharCallback);
+  void setData(void*);
   void reset();
 };

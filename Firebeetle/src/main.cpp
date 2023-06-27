@@ -1,35 +1,28 @@
 #include <Arduino.h>
 #include <HTTPClient.h>
+#include <LiquidCrystal_I2C.h>
 #include <SPI.h>
-#include <WiFi.h>
-#include <WiFiUdp.h>
-#include <VS1053.h>
 #include <SPIFFS.h>
+#include <VS1053.h>
+#include <WiFi.h>
+#include <sqlite3.h>
+
 #include "../../XML/XmlParser/xml.h"
+#include "dlna/dlna.h"
 #include "vs1053b-patches-flac.h"
 
-/*
-Server[1]: IP address: 192.168.68.106, port: 32469, name: Plex Media Server:
-Mac Mini
-  -> controlURL:
-ContentDirectory/73c5e1c3-8305-d645-c7db-95aa99f409ab/control.xml
-*/
-
-#define SERVER_IP "192.168.68.106"
-#define SERVER_PORT 32469
-#define SERVER_CONTROL_URL "ContentDirectory/73c5e1c3-8305-d645-c7db-95aa99f409ab/control.xml"
+LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 #define VS1053_CS 13
 #define VS1053_DCS 25
 #define VS1053_DREQ 26
-
 #define VOLUME 100  // volume level 0-100
 
 VS1053 player(VS1053_CS, VS1053_DCS, VS1053_DREQ);
 
-WiFiClient client;
-WiFiUDP udp;
+WiFiClient wifiClient;
 HTTPClient httpClient;
+sqlite3 *database;
 
 bool connectWiFi() {
   bool result = false;
@@ -59,119 +52,24 @@ exit:
   return result;
 }
 
-XmlParser browseParser, resultParser;
-
-void resultCallback(char *pname, char *pvalue) {
-  if (pvalue && *pvalue) {
-    Serial.printf("%s = %s\n", pname, pvalue);
-  }
-}
-
-void resultChar(char *pname, char c) {
-  resultParser.processChar(c);
-}
-
-void browseCallback(char *pname, char *pvalue) {
-  if (pvalue && *pvalue) {
-    Serial.printf("%s = %s\n", pname, pvalue);
-  }
-  if (!strcmp(pname, "Result")) {
-    if (!pvalue) {
-      browseParser.setCharCallback(resultChar);
-    } else {
-      browseParser.setCharCallback(0);
-    }
-  }
-}
-
-void browse(char *pid) {
-  String action("");
-  char buffer[256];
-  HTTPClient http_client;
-  int c, count, n;
-
-  Serial.printf("Browsing object %s at %s\n", pid, SERVER_CONTROL_URL);
-
-  action += "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">";
-  action += "<s:Body>";
-  action += "<u:Browse xmlns:u=\"urn:schemas-upnp-org:service:ContentDirectory:1\">";
-  sprintf(buffer, "<ObjectID>%s</ObjectID>", pid);
-  action += buffer;
-  action += "<BrowseFlag>BrowseDirectChildren</BrowseFlag>";
-  action += "<Filter>*</Filter>";
-  action += "<StartingIndex>0</StartingIndex>";
-  action += "<RequestedCount>10</RequestedCount>";
-  action += "<SortCriteria></SortCriteria>";
-  action += "</u:Browse>";
-  action += "</s:Body>";
-  action += "</s:Envelope>";
-
-  sprintf(buffer, "http://%s:%d/%s", SERVER_IP, SERVER_PORT, SERVER_CONTROL_URL);
-  http_client.begin(client, buffer);
-  http_client.addHeader("SOAPACTION", "\"urn:schemas-upnp-org:service:ContentDirectory:1#Browse\"");
-  int code = http_client.POST(action);
-
-  browseParser.setXmlCallback(browseCallback);
-  resultParser.setXmlCallback(resultCallback);
-
-  while (client.available() == 0) {
-    delay(100);
-  }
-
-  while (true) {
-    count = client.available();
-    if (count == 0) {
-      break;
-    }
-    if (count > 256) {
-      count = 256;
-    }
-    client.readBytes(buffer, count);
-    for (n = 0; n < count; n++) {
-      browseParser.processChar(buffer[n]);
-    }
-  }
-
-  http_client.end();
-}
-
-void handleSearchLine(char *pline) {
-  // Look for the Location: header
-
-  char *pname = pline;
-  char *pseparator = strchr(pline, ':');
-  if (!pseparator) {
-    return;
-  }
-  *pseparator = 0;
-  char *pvalue = pname + strlen(pname) + 1;
-  while (isWhitespace(*pvalue)) {
-    pvalue++;
-  }
-
-  if (!lwip_stricmp(pname, "location")) {
-    // fetchDescription(pvalue);
-  }
-}
-
 void playtest() {
   HTTPClient http_client;
   int n, count, buffer_size = 10240;
   byte *pbuffer;
 
   Serial.println("Requesting track");
-  http_client.begin(client, "http://192.168.68.106:32469/object/25c5b27880aae2a04eed/file.flac");
+  http_client.begin(wifiClient, "http://192.168.68.106:32469/object/25c5b27880aae2a04eed/file.flac");
   int code = http_client.GET();
   Serial.printf("Got code %d from track URL\n", code);
 
   pbuffer = new byte[buffer_size];
 
-  while (client.available() == 0) {
+  while (wifiClient.available() == 0) {
     delay(100);
   }
 
   while (true) {
-    count = client.available();
+    count = wifiClient.available();
     if (count == 0) {
       Serial.println("No data available, waiting");
       delay(100);
@@ -181,13 +79,30 @@ void playtest() {
       Serial.println("Buffer limit reached");
       count = buffer_size;
     }
-    client.readBytes(pbuffer, count);
+    wifiClient.readBytes(pbuffer, count);
     player.playChunk(pbuffer, count);
   }
 
-  delete [] pbuffer;
+  delete[] pbuffer;
   http_client.end();
   Serial.println("Finished playing");
+}
+
+void fileTest() {
+  int count;
+  uint8_t buffer[1024];
+
+  SPIFFS.begin();
+  File file = SPIFFS.open("/bbc.ts", "r");
+  Serial.printf("File size = %d\n", file.size());
+
+  count = file.readBytes((char *)buffer, 1024);
+  while (count > 0) {
+    player.playChunk(buffer, count);
+    count = file.readBytes((char *)buffer, 1024);
+  }
+
+  Serial.println("Player finished");
 }
 
 bool initPlayer() {
@@ -211,7 +126,104 @@ exit:
   return result;
 }
 
+int sqlCallback(void *data, int argc, char **argv, char **azColName) {
+  int i;
+
+  for (i = 0; i < argc; i++) {
+    Serial.printf("%s = %s\n", azColName[i], argv[i] ? argv[i] : "NULL");
+  }
+  Serial.println();
+
+  return 0;
+}
+
+void dumpDatabase() {
+  int rc;
+  sqlite3_stmt *stmt;
+
+  rc = sqlite3_prepare_v2(database, "SELECT * FROM albums", -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    Serial.printf("Error during preparation: ", sqlite3_errmsg(database));
+    goto exit;
+  }
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    const unsigned char *id = sqlite3_column_text(stmt, 0);
+    const unsigned char *title = sqlite3_column_text(stmt, 1);
+    Serial.printf("ID %s: %s\n", id, title);
+  }
+  if (rc != SQLITE_DONE) {
+    Serial.printf("Error during steps: ", sqlite3_errmsg(database));
+  }
+
+exit:
+  sqlite3_finalize(stmt);
+}
+
+bool initDatabase() {
+  bool result = false;
+  int rc;
+
+  SPIFFS.remove("/plex.db"); // For now remove the database at each run.
+
+  rc = sqlite3_initialize();
+  if (rc != SQLITE_OK) {
+    Serial.printf("Can't initialise database, error code: %d\n", rc);
+    goto exit;
+  }
+
+  rc = sqlite3_open("/spiffs/plex.db", &database);
+  if (rc != SQLITE_OK) {
+    Serial.printf("Can't open database: %s\n", sqlite3_errmsg(database));
+    goto exit;
+  }
+
+  rc = sqlite3_exec(database, "CREATE TABLE IF NOT EXISTS albums (id TEXT PRIMARY KEY, title TEXT)", NULL, NULL, NULL);
+  if (rc != SQLITE_OK) {
+    Serial.printf("Can't create albums table: %s\n", sqlite3_errmsg(database));
+    goto exit;
+  }
+
+  result = true;
+
+exit:
+  return result;
+}
+
+void addAlbum(Object *pobject) {
+  int rc;
+  sqlite3_stmt *stmt;
+
+  rc = sqlite3_prepare_v2(database, "INSERT INTO albums (id, title) VALUES (?, ?)", -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    Serial.printf("Error during album preparation: %s\n", sqlite3_errmsg(database));
+    goto exit;
+  }
+
+  rc = sqlite3_bind_text(stmt, 1, pobject->id, -1, SQLITE_STATIC);
+  if (rc != SQLITE_OK) {
+    Serial.printf("Error during album binding: %s\n", sqlite3_errmsg(database));
+    goto exit;
+  }
+
+  rc = sqlite3_bind_text(stmt, 2, pobject->name, -1, SQLITE_STATIC);
+  if (rc != SQLITE_OK) {
+    Serial.printf("Error during album binding: %s\n", sqlite3_errmsg(database));
+    goto exit;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    Serial.printf("Error during album step: %s\n", sqlite3_errmsg(database));
+    goto exit;
+  }
+
+exit:
+  sqlite3_finalize(stmt);
+}
+
 void setup() {
+  int n;
+
   Serial.begin(115200);
   Serial.println();
   Serial.println("Starting");
@@ -227,63 +239,59 @@ void setup() {
     Serial.println("WiFi initialised");
   }
 
-  SPI.begin();
+  if (SPIFFS.begin()) {
+    Serial.println("SPIFFS initialised");
+  } else {
+    Serial.println("Error initialising SPIFFS");
+  }
+
+  if (initDatabase()) {
+    Serial.println("Database initialised");
+  } else {
+    Serial.println("Error initialising database");
+  }
+
+  /*SPI.begin();
   Serial.println("SPI initialised");
 
   if (initPlayer()) {
     Serial.println("VS1053 initialised");
   } else {
     Serial.println("Error initialising VS1053");
+  }*/
+
+  // fileTest();
+  // playtest();
+  // browse("ab31bafbbb287b8e9bb9");
+  // return;
+
+  SearchResult *presult = DLNA.findServers();
+  for (n = 0; n < presult->count; n++) {
+    Serial.printf("Found %s, id %s, control %s%s\n", (presult->pServers + n)->name, (presult->pServers + n)->id, (presult->pServers + n)->baseDomain, (presult->pServers + n)->controlPath);
   }
 
-  playtest();
-  //browse("ab31bafbbb287b8e9bb9");
-  return;
+  // If there's a Plex server found then use its music ID.
+  // IDs are permanent so we can use a fixed value.
 
-  if (udp.begin(1967)) {
-    Serial.println("UDP listening");
+  /*
+  Get list of albums from server (any order).
+  Add each to database. (Instead of creating a list?)
+  Query database (with ordering and filtering?) to get screen contents on the album list screen.
+  */
+
+  DLNAServer *pPlex = presult->pServers;
+  BrowseResult *pbrowse = pPlex->browse("9b55ecd3e74c09febffe", 0, 10);
+  Serial.printf("%d objects found\n", pbrowse->count);
+  for (n = 0; n < pbrowse->count; n++) {
+    //Serial.printf("Found object %s, ID %s, resource %s\n", (pbrowse->pObjects + n)->name, (pbrowse->pObjects + n)->id, (pbrowse->pObjects + n)->resource);
+    addAlbum(pbrowse->pObjects + n);
   }
 
-  char packet[] =
-      "M-SEARCH * HTTP/1.1\nHOST: 239.255.255.250:1900\n"
-      "MAN: \"ssdp:discover\"\n"
-      "MX: 1\n"
-      "ST: urn:schemas-upnp-org:device:MediaServer:1\n"
-      "CPFN.UPNP.ORG: \"Plex radio\"\n"
-      "\n";
-  IPAddress server;
-  server.fromString("239.255.255.250");
-  udp.beginPacket(server, 1900);
-  udp.write((uint8_t *)packet, strlen(packet));
-  udp.endPacket();
+  delete pbrowse;
+  delete presult;
+
+  dumpDatabase();
 }
 
 void loop() {
-  return;
-
-  int length, line;
-  char *ppacket, *pline, *pend;
-
-  length = udp.parsePacket();
-  if (length == 0) {
-    return;
-  }
-
-  // Read the whole received packet into memory and parse afterwards so
-  // there's no problem with re-using internet connections.
-  ppacket = new char[length];
-  udp.readBytes(ppacket, length);
-
-  // Header lines end CR-LF so remove the CR by setting the null terminator.
-  pline = ppacket;
-  pend = strchr(pline, '\r');
-  while (pend) {
-    *pend = 0;
-    if (*pline) {
-      handleSearchLine(pline);
-    }
-    pline = pend + 2;
-    pend = strchr(pline, '\r');
-  }
-  delete[] ppacket;
 }
