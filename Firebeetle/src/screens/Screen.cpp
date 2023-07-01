@@ -1,8 +1,5 @@
 #include "Screen.h"
 #include "Output.h"
-#include "wait.xbm"
-#include "cross.xbm"
-#include "tick.xbm"
 
 Screen::Screen () {
 }
@@ -26,19 +23,10 @@ void Screen::deactivate() {
 }
 
 void Screen::showWaiting() {
-    Output.clear();
-    Output.drawBitmap(wait_bits);
-    Output.flush();
 }
 
 void Screen::showSuccess() {
-    Output.clear();
-    Output.drawBitmap(tick_bits);
-    Output.flush();
 }
 
 void Screen::showFailure() {
-    Output.clear();
-    Output.drawBitmap(cross_bits);
-    Output.flush();
 }

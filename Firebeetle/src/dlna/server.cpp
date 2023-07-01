@@ -123,11 +123,11 @@ void DLNAServer::resultCallback(char *pname, char *pvalue, void *pdata) {
       pobject = new Object;
     }
   } else if (!strcasecmp(pname, "dc:title") && pvalue) {
-    strcpy(pobject->name, pvalue);
+    strlcpy(pobject->name, pvalue, NAME_SIZE);
   } else if (!strcasecmp(pname, "id") && pvalue) {
-    strcpy(pobject->id, pvalue);
+    strlcpy(pobject->id, pvalue, ID_SIZE);
   } else if (!strcasecmp(pname, "res") && pvalue) {
-    strcpy(pobject->resource, pvalue);
+    strlcpy(pobject->resource, pvalue, RESOURCE_SIZE);
   }
 }
 

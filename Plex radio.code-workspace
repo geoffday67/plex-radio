@@ -6,6 +6,10 @@
     {
       "name": "ESP8266",
       "path": "ESP8266"
+    },
+    {
+      "name": "ESP32",
+      "path": "ESP32"
     }
   ],
   "settings": {

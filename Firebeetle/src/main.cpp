@@ -1,17 +1,21 @@
 #include <Arduino.h>
 #include <HTTPClient.h>
-#include <LiquidCrystal_I2C.h>
+#include <LittleFS.h>
 #include <SPI.h>
 #include <SPIFFS.h>
 #include <VS1053.h>
 #include <WiFi.h>
 #include <sqlite3.h>
 
-#include "../../XML/XmlParser/xml.h"
-#include "dlna/dlna.h"
-#include "vs1053b-patches-flac.h"
+#include <regex>
 
-LiquidCrystal_I2C lcd(0x27, 16, 2);
+#include "../../XML/XmlParser/xml.h"
+#include "data/album.h"
+#include "data/data.h"
+#include "dlna/dlna.h"
+#include "screens/Albums.h"
+#include "screens/Output.h"
+#include "vs1053b-patches-flac.h"
 
 #define VS1053_CS 13
 #define VS1053_DCS 25
@@ -137,58 +141,6 @@ int sqlCallback(void *data, int argc, char **argv, char **azColName) {
   return 0;
 }
 
-void dumpDatabase() {
-  int rc;
-  sqlite3_stmt *stmt;
-
-  rc = sqlite3_prepare_v2(database, "SELECT * FROM albums", -1, &stmt, NULL);
-  if (rc != SQLITE_OK) {
-    Serial.printf("Error during preparation: ", sqlite3_errmsg(database));
-    goto exit;
-  }
-  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-    const unsigned char *id = sqlite3_column_text(stmt, 0);
-    const unsigned char *title = sqlite3_column_text(stmt, 1);
-    Serial.printf("ID %s: %s\n", id, title);
-  }
-  if (rc != SQLITE_DONE) {
-    Serial.printf("Error during steps: ", sqlite3_errmsg(database));
-  }
-
-exit:
-  sqlite3_finalize(stmt);
-}
-
-bool initDatabase() {
-  bool result = false;
-  int rc;
-
-  SPIFFS.remove("/plex.db"); // For now remove the database at each run.
-
-  rc = sqlite3_initialize();
-  if (rc != SQLITE_OK) {
-    Serial.printf("Can't initialise database, error code: %d\n", rc);
-    goto exit;
-  }
-
-  rc = sqlite3_open("/spiffs/plex.db", &database);
-  if (rc != SQLITE_OK) {
-    Serial.printf("Can't open database: %s\n", sqlite3_errmsg(database));
-    goto exit;
-  }
-
-  rc = sqlite3_exec(database, "CREATE TABLE IF NOT EXISTS albums (id TEXT PRIMARY KEY, title TEXT)", NULL, NULL, NULL);
-  if (rc != SQLITE_OK) {
-    Serial.printf("Can't create albums table: %s\n", sqlite3_errmsg(database));
-    goto exit;
-  }
-
-  result = true;
-
-exit:
-  return result;
-}
-
 void addAlbum(Object *pobject) {
   int rc;
   sqlite3_stmt *stmt;
@@ -239,17 +191,26 @@ void setup() {
     Serial.println("WiFi initialised");
   }
 
-  if (SPIFFS.begin()) {
+  if (LittleFS.begin(true)) {
+    Serial.println("LittleFS initialised");
+  } else {
+    Serial.println("Error initialising LittleFS");
+  }
+
+  Serial.printf("Total bytes in file system: %d\n", LittleFS.totalBytes());
+
+  /*if (SPIFFS.begin(true)) {
     Serial.println("SPIFFS initialised");
   } else {
     Serial.println("Error initialising SPIFFS");
-  }
+  }*/
 
-  if (initDatabase()) {
-    Serial.println("Database initialised");
-  } else {
-    Serial.println("Error initialising database");
-  }
+  Output.begin();
+  Serial.println("Output initialised");
+  Output.addText(0, 0, "Geoff is great!");
+
+  Data.begin();
+  Serial.println("Database initialised");
 
   /*SPI.begin();
   Serial.println("SPI initialised");
@@ -270,27 +231,44 @@ void setup() {
     Serial.printf("Found %s, id %s, control %s%s\n", (presult->pServers + n)->name, (presult->pServers + n)->id, (presult->pServers + n)->baseDomain, (presult->pServers + n)->controlPath);
   }
 
-  // If there's a Plex server found then use its music ID.
-  // IDs are permanent so we can use a fixed value.
-
-  /*
-  Get list of albums from server (any order).
-  Add each to database. (Instead of creating a list?)
-  Query database (with ordering and filtering?) to get screen contents on the album list screen.
-  */
-
   DLNAServer *pPlex = presult->pServers;
-  BrowseResult *pbrowse = pPlex->browse("9b55ecd3e74c09febffe", 0, 10);
+  BrowseResult *pbrowse = pPlex->browse("9b55ecd3e74c09febffe", 0, 30);
   Serial.printf("%d objects found\n", pbrowse->count);
+  Album *palbums = new Album[pbrowse->count], *palbum = palbums;
+  char *pname, *pseparator;
+  std::regex regexYear(" \\(\\d\\d\\d\\d\\)$");
+  std::cmatch matchYear;
   for (n = 0; n < pbrowse->count; n++) {
-    //Serial.printf("Found object %s, ID %s, resource %s\n", (pbrowse->pObjects + n)->name, (pbrowse->pObjects + n)->id, (pbrowse->pObjects + n)->resource);
-    addAlbum(pbrowse->pObjects + n);
+    // Serial.printf("Found object %s, ID %s, resource %s\n", (pbrowse->pObjects + n)->name, (pbrowse->pObjects + n)->id, (pbrowse->pObjects + n)->resource);
+    // Convert the objects into albums.
+    strlcpy(palbum->id, (pbrowse->pObjects + n)->id, ID_SIZE);
+
+    pname = strdup((pbrowse->pObjects + n)->name);
+
+    std::regex_search(pname, matchYear, regexYear);
+    if (!matchYear.empty()) {
+      pname[matchYear.position(0)] = 0;
+    }
+
+    pseparator = strstr(pname, " - ");
+    if (pseparator) {
+      *pseparator = 0;
+      strlcpy(palbum->artist, pname, ARTIST_SIZE);
+      strlcpy(palbum->title, pseparator + 3, TITLE_SIZE);
+    } else {
+      strlcpy(palbum->title, pname, TITLE_SIZE);
+    }
+
+    free(pname);
+
+    palbum++;
   }
+  Data.storeAlbums(palbums, pbrowse->count);
 
   delete pbrowse;
   delete presult;
 
-  dumpDatabase();
+  Data.dumpDatabase();
 }
 
 void loop() {

@@ -1,10 +1,12 @@
 #pragma once
 
+#include "constants.h"
+
 class Object {
  public:
   Object();
 
-  char name[128];
-  char id[64];
-  char resource[128];
+  char id[ID_SIZE];
+  char name[NAME_SIZE];
+  char resource[RESOURCE_SIZE];
 };
