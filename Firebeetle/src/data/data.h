@@ -3,6 +3,7 @@
 #include <sqlite3.h>
 
 #include "album.h"
+#include "track.h"
 
 class classData {
  private:
@@ -11,8 +12,11 @@ class classData {
 
  public:
   bool begin();
-  Album *getAlbums();
+  void clearAll();
+  int getAlbums(Album **ppresult);
+  void storeAlbum(Album *);
   void storeAlbums(Album *palbums, int count);
+  void storeTracks(Track* ptracks, int count);
   void dumpDatabase();
 };
 

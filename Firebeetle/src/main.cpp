@@ -12,10 +12,16 @@
 #include "../../XML/XmlParser/xml.h"
 #include "data/album.h"
 #include "data/data.h"
+#include "data/track.h"
 #include "dlna/dlna.h"
+#include "rotary.h"
 #include "screens/Albums.h"
 #include "screens/Output.h"
 #include "vs1053b-patches-flac.h"
+
+#define ENCODER_CLK 16
+#define ENCODER_DT 17
+#define ENCODER_BUTTON 4
 
 #define VS1053_CS 13
 #define VS1053_DCS 25
@@ -27,6 +33,7 @@ VS1053 player(VS1053_CS, VS1053_DCS, VS1053_DREQ);
 WiFiClient wifiClient;
 HTTPClient httpClient;
 sqlite3 *database;
+Rotary encoder(ENCODER_CLK, ENCODER_DT, ENCODER_BUTTON);
 
 bool connectWiFi() {
   bool result = false;
@@ -130,51 +137,48 @@ exit:
   return result;
 }
 
-int sqlCallback(void *data, int argc, char **argv, char **azColName) {
-  int i;
+DLNAServer *pPlex;
 
-  for (i = 0; i < argc; i++) {
-    Serial.printf("%s = %s\n", azColName[i], argv[i] ? argv[i] : "NULL");
-  }
-  Serial.println();
-
-  return 0;
+void onServerFound(DLNAServer *pserver) {
+  Serial.printf("Server found: %s\n", pserver->name);
+  delete pPlex;
+  pPlex = new DLNAServer(*pserver);
 }
 
-void addAlbum(Object *pobject) {
-  int rc;
-  sqlite3_stmt *stmt;
+void onObjectFound(Object *pobject) {
+  static std::regex regexYear(" \\(\\d\\d\\d\\d\\)$");
+  static std::cmatch matchYear;
 
-  rc = sqlite3_prepare_v2(database, "INSERT INTO albums (id, title) VALUES (?, ?)", -1, &stmt, NULL);
-  if (rc != SQLITE_OK) {
-    Serial.printf("Error during album preparation: %s\n", sqlite3_errmsg(database));
-    goto exit;
+  Album *palbum = new Album;
+  char *pname, *pseparator;
+
+  strlcpy(palbum->id, pobject->id, ID_SIZE);
+
+  pname = strdup(pobject->name);
+
+  std::regex_search(pname, matchYear, regexYear);
+  if (!matchYear.empty()) {
+    pname[matchYear.position(0)] = 0;
   }
 
-  rc = sqlite3_bind_text(stmt, 1, pobject->id, -1, SQLITE_STATIC);
-  if (rc != SQLITE_OK) {
-    Serial.printf("Error during album binding: %s\n", sqlite3_errmsg(database));
-    goto exit;
+  pseparator = strstr(pname, " - ");
+  if (pseparator) {
+    *pseparator = 0;
+    strlcpy(palbum->artist, pname, ARTIST_SIZE);
+    strlcpy(palbum->title, pseparator + 3, TITLE_SIZE);
+  } else {
+    strlcpy(palbum->title, pname, TITLE_SIZE);
   }
 
-  rc = sqlite3_bind_text(stmt, 2, pobject->name, -1, SQLITE_STATIC);
-  if (rc != SQLITE_OK) {
-    Serial.printf("Error during album binding: %s\n", sqlite3_errmsg(database));
-    goto exit;
-  }
+  free(pname);
 
-  rc = sqlite3_step(stmt);
-  if (rc != SQLITE_DONE) {
-    Serial.printf("Error during album step: %s\n", sqlite3_errmsg(database));
-    goto exit;
-  }
-
-exit:
-  sqlite3_finalize(stmt);
+  Serial.printf("Found album %s\n", palbum->title);
+  Data.storeAlbum(palbum);
+  delete palbum;
 }
 
 void setup() {
-  int n;
+  int n, t;
 
   Serial.begin(115200);
   Serial.println();
@@ -196,7 +200,6 @@ void setup() {
   } else {
     Serial.println("Error initialising LittleFS");
   }
-
   Serial.printf("Total bytes in file system: %d\n", LittleFS.totalBytes());
 
   /*if (SPIFFS.begin(true)) {
@@ -212,6 +215,12 @@ void setup() {
   Data.begin();
   Serial.println("Database initialised");
 
+  encoder.begin();
+  Serial.println("Encoder initialised");
+
+  Albums.activate();
+  return;
+
   /*SPI.begin();
   Serial.println("SPI initialised");
 
@@ -221,26 +230,32 @@ void setup() {
     Serial.println("Error initialising VS1053");
   }*/
 
-  // fileTest();
-  // playtest();
-  // browse("ab31bafbbb287b8e9bb9");
-  // return;
+  Data.clearAll();
 
-  SearchResult *presult = DLNA.findServers();
-  for (n = 0; n < presult->count; n++) {
+  Serial.printf("Free memory before: %d\n", esp_get_free_heap_size());
+
+  Serial.println("Finding servers");
+  DLNA.findServers(onServerFound);
+  Serial.printf("Free memory: %d\n", esp_get_free_heap_size());
+
+  Serial.printf("\nPlex server name: %s\n\n", pPlex->name);
+
+  pPlex->browse("9b55ecd3e74c09febffe", 0, 50, onObjectFound);
+  Serial.printf("Free memory: %d\n", esp_get_free_heap_size());
+
+  /*for (n = 0; n < presult->count; n++) {
     Serial.printf("Found %s, id %s, control %s%s\n", (presult->pServers + n)->name, (presult->pServers + n)->id, (presult->pServers + n)->baseDomain, (presult->pServers + n)->controlPath);
   }
 
   DLNAServer *pPlex = presult->pServers;
-  BrowseResult *pbrowse = pPlex->browse("9b55ecd3e74c09febffe", 0, 30);
+  BrowseResult *pbrowse = pPlex->browse("9b55ecd3e74c09febffe", 0, 10);
   Serial.printf("%d objects found\n", pbrowse->count);
+
   Album *palbums = new Album[pbrowse->count], *palbum = palbums;
   char *pname, *pseparator;
   std::regex regexYear(" \\(\\d\\d\\d\\d\\)$");
   std::cmatch matchYear;
   for (n = 0; n < pbrowse->count; n++) {
-    // Serial.printf("Found object %s, ID %s, resource %s\n", (pbrowse->pObjects + n)->name, (pbrowse->pObjects + n)->id, (pbrowse->pObjects + n)->resource);
-    // Convert the objects into albums.
     strlcpy(palbum->id, (pbrowse->pObjects + n)->id, ID_SIZE);
 
     pname = strdup((pbrowse->pObjects + n)->name);
@@ -261,15 +276,38 @@ void setup() {
 
     free(pname);
 
+    // Get track details for album.
+    BrowseResult *pTrackBrowse = pPlex->browse(palbum->id, 0, 100);
+    Track *ptracks = new Track[pTrackBrowse->count], *ptrack = ptracks;
+    for (t = 0; t < pTrackBrowse->count; t++) {
+      strlcpy(ptrack->id, (pTrackBrowse->pObjects + t)->id, ID_SIZE);
+      strlcpy(ptrack->title, (pTrackBrowse->pObjects + t)->name, TITLE_SIZE);
+      strlcpy(ptrack->resource, (pTrackBrowse->pObjects + t)->resource, RESOURCE_SIZE);
+      ptrack++;
+    }
+    Serial.printf("Got %d tracks for album %s\n", pTrackBrowse->count, palbum->title);
+    delete pTrackBrowse;
+    // Data.storeTracks(ptracks, pTrackBrowse->count);
+    delete[] ptracks;
+    Serial.printf("Free memory: %d\n", esp_get_free_heap_size());
+
     palbum++;
   }
   Data.storeAlbums(palbums, pbrowse->count);
+  delete[] palbums;
 
   delete pbrowse;
-  delete presult;
+  delete presult;*/
 
-  Data.dumpDatabase();
+  // Data.dumpDatabase();
 }
 
 void loop() {
+  int direction;
+
+  if (direction = encoder.getDirection()) {
+    EventManager.queueEvent(new EncoderEvent(direction));
+  }
+
+  EventManager.processEvents();
 }

@@ -36,8 +36,8 @@ public:
 /*****************************************************************************/
 class EncoderEvent: public Event {
 public:
-    EncoderEvent(int position);
-    int position;
+    EncoderEvent(int step);
+    int step;
 };
 
 /*****************************************************************************/

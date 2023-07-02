@@ -33,6 +33,7 @@ XmlParser::~XmlParser() {
     delete pLexicalParser;
   }
   delete pEntityParser;
+  delete pSubParser;
 }
 
 void XmlParser::init() {

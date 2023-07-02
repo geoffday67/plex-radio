@@ -8,44 +8,37 @@ extern WiFiClient wifiClient;
 
 static const char *TAG = "SERVER";
 
-BrowseResult::BrowseResult() {
-  count = 0;
-  pObjects = 0;
-}
-
-BrowseResult::~BrowseResult() {
-  delete[] pObjects;
-}
-
-void BrowseResult::addObject(Object *pobject) {
-  int n;
-
-  Object *pnew = new Object[count + 1];
-  if (count > 0) {
-    memcpy(pnew, pObjects, count * sizeof(Object));
-  }
-  memcpy(pnew + count, pobject, sizeof(Object));
-  delete[] pObjects;
-  count++;
-  pObjects = pnew;
-}
-
 DLNAServer::DLNAServer() {
   id[0] = 0;
   name[0] = 0;
   descriptionURL[0] = 0;
   controlPath[0] = 0;
   baseDomain[0] = 0;
+  pBrowseParser = 0;
+  pResultParser = 0;
 }
 
-BrowseResult *DLNAServer::browse(char *pid, int offset, int results) {
+DLNAServer::DLNAServer(DLNAServer &src) {
+  strcpy(id, src.id);
+  strcpy(name, src.name);
+  strcpy(descriptionURL, src.descriptionURL);
+  strcpy(controlPath, src.controlPath);
+  strcpy(baseDomain, src.baseDomain);
+  pBrowseParser = 0;
+  pResultParser = 0;
+}
+
+DLNAServer::~DLNAServer() {
+  delete pBrowseParser;
+  delete pResultParser;
+}
+
+void DLNAServer::browse(char *pid, int offset, int results, ObjectCallback objectCallback) {
   String action("");
   char buffer[256];
   HTTPClient http_client;
   int c, count, n, size, processed;
   unsigned long start;
-
-  pBrowseResult = new BrowseResult;
 
   action += "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">";
   action += "<s:Body>";
@@ -64,6 +57,7 @@ BrowseResult *DLNAServer::browse(char *pid, int offset, int results) {
 
   sprintf(buffer, "%s%s", baseDomain, controlPath);
   ESP_LOGD(TAG, "Browsing object %s at %s", pid, buffer);
+  http_client.setReuse(false);
   http_client.begin(wifiClient, buffer);
   http_client.addHeader("SOAPACTION", "\"urn:schemas-upnp-org:service:ContentDirectory:1#Browse\"");
   int code = http_client.POST(action);
@@ -74,13 +68,21 @@ BrowseResult *DLNAServer::browse(char *pid, int offset, int results) {
 
   size = http_client.getSize();
 
-  browseParser.reset();
-  browseParser.setXmlCallback(browseCallback);
-  browseParser.setData(this);
+  if (!pBrowseParser) {
+    pBrowseParser = new XmlParser();
+  }
+  pBrowseParser->reset();
+  pBrowseParser->setXmlCallback(browseCallback);
+  pBrowseParser->setData(this);
 
-  resultParser.reset();
-  resultParser.setXmlCallback(resultCallback);
-  resultParser.setData(this);
+  if (!pResultParser) {
+    pResultParser = new XmlParser();
+  }
+  pResultParser->reset();
+  pResultParser->setXmlCallback(resultCallback);
+  pResultParser->setData(this);
+
+  this->objectCallback = objectCallback;
 
   processed = 0;
   while (processed < size) {
@@ -97,28 +99,23 @@ BrowseResult *DLNAServer::browse(char *pid, int offset, int results) {
     }
     wifiClient.readBytes(buffer, count);
     for (n = 0; n < count; n++) {
-      browseParser.processChar(buffer[n]);
+      pBrowseParser->processChar(buffer[n]);
       processed++;
     }
   }
 
 exit:
   http_client.end();
-
-  return pBrowseResult;
 }
 
 void DLNAServer::resultCallback(char *pname, char *pvalue, void *pdata) {
   DLNAServer *pserver = (DLNAServer *)pdata;
   static Object *pobject;
 
-  /*if (pname && pvalue && *pvalue) {
-    Serial.printf("%s = %s\n", pname, pvalue);
-  }*/
-
   if (!strcasecmp(pname, "container") || !strcasecmp(pname, "item")) {
     if (pvalue) {
-      pserver->pBrowseResult->addObject(pobject);
+      (*pserver->objectCallback)(pobject);
+      delete pobject;
     } else {
       pobject = new Object;
     }
@@ -134,7 +131,7 @@ void DLNAServer::resultCallback(char *pname, char *pvalue, void *pdata) {
 void DLNAServer::resultChar(char *pname, char c, void *pdata) {
   DLNAServer *pserver = (DLNAServer *)pdata;
 
-  pserver->resultParser.processChar(c);
+  pserver->pResultParser->processChar(c);
 }
 
 void DLNAServer::browseCallback(char *pname, char *pvalue, void *pdata) {
@@ -142,9 +139,9 @@ void DLNAServer::browseCallback(char *pname, char *pvalue, void *pdata) {
 
   if (!strcmp(pname, "Result")) {
     if (!pvalue) {
-      pserver->browseParser.setCharCallback(resultChar);
+      pserver->pBrowseParser->setCharCallback(resultChar);
     } else {
-      pserver->browseParser.setCharCallback(0);
+      pserver->pBrowseParser->setCharCallback(0);
     }
   }
 }

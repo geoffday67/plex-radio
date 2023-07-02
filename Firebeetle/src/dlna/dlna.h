@@ -5,32 +5,19 @@
 #include "../../XML/XmlParser/xml.h"
 #include "server.h"
 
-class SearchResult {
- public:
-  SearchResult();
-  ~SearchResult();
-  int count;
-  DLNAServer *pServers;
-
- private:
-  void addServer(DLNAServer *);
-  bool contains(DLNAServer *);
-
-  friend class classDLNA;
-};
-
 class Service {
-private:
-  char type[128];  
+ private:
+  char type[128];
   char controlURL[128];
 
   friend class classDLNA;
 };
 
+typedef void (*ServerCallback)(DLNAServer *);
+
 class classDLNA {
  public:
-  classDLNA();
-  SearchResult *findServers();
+  void findServers(ServerCallback serverCallback);
 
  private:
   WiFiUDP udp;

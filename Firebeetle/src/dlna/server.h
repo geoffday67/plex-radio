@@ -3,29 +3,21 @@
 #include "../../XML/XmlParser/xml.h"
 #include "object.h"
 
-class BrowseResult {
- public:
-  BrowseResult();
-  ~BrowseResult();
-  int count;
-  Object *pObjects;
-
- private:
-  void addObject(Object *);
-
-  friend class DLNAServer;
-};
+typedef void (*ObjectCallback)(Object *);
 
 class DLNAServer {
  private:
-  BrowseResult *pBrowseResult;
-  XmlParser browseParser, resultParser;
+  XmlParser *pBrowseParser, *pResultParser;
+  ObjectCallback objectCallback;
+
   static void browseCallback(char *, char *, void *);
   static void resultChar(char *, char, void *);
   static void resultCallback(char *, char *, void *);
 
  public:
   DLNAServer();
+  DLNAServer(DLNAServer&);
+  ~DLNAServer();
 
   char baseDomain[128];
   char descriptionURL[128];
@@ -33,5 +25,5 @@ class DLNAServer {
   char id[128];
   char name[128];
 
-  BrowseResult *browse(char *pid, int offset, int results);
+  void browse(char *pid, int offset, int results, ObjectCallback objectCallback);
 };

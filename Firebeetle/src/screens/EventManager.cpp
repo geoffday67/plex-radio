@@ -13,8 +13,8 @@ TimeEvent::TimeEvent(time_t time): Event(EVENT_TIME) {
     this->time = time;
 }
 
-EncoderEvent::EncoderEvent(int position): Event(EVENT_ENCODER) {
-    this->position = position;
+EncoderEvent::EncoderEvent(int step): Event(EVENT_ENCODER) {
+    this->step = step;
 }
 
 MenuEvent::MenuEvent(int choice): Event(EVENT_MENU) {

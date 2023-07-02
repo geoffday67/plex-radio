@@ -11,44 +11,7 @@ extern WiFiClient wifiClient;
 
 static const char *TAG = "DLNA";
 
-SearchResult::SearchResult() {
-  count = 0;
-  pServers = 0;
-}
-
-SearchResult::~SearchResult() {
-  delete[] pServers;
-}
-
-void SearchResult::addServer(DLNAServer *pserver) {
-  int n;
-
-  DLNAServer *pnew = new DLNAServer[count + 1];
-  if (count > 0) {
-    memcpy(pnew + 1, pServers, count * sizeof(DLNAServer));
-  }
-  memcpy(pnew, pserver, sizeof(DLNAServer));
-  delete[] pServers;
-  count++;
-  pServers = pnew;
-}
-
-bool SearchResult::contains(DLNAServer *pserver) {
-  int n;
-
-  for (n = 0; n < count; n++) {
-    if (!strcmp(pserver->id, pServers[n].id)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-classDLNA::classDLNA() {
-}
-
-SearchResult *classDLNA::findServers() {
+void classDLNA::findServers(ServerCallback serverCallback) {
   int length;
   char *ppacket, *pline, *pend;
 
@@ -63,8 +26,6 @@ SearchResult *classDLNA::findServers() {
   udp.beginPacket("239.255.255.250", 1900);
   udp.write((uint8_t *)packet, strlen(packet));
   udp.endPacket();
-
-  SearchResult *presult = new SearchResult;
 
   // Receive packets for 3 seconds.
   unsigned long start = millis();
@@ -98,18 +59,17 @@ SearchResult *classDLNA::findServers() {
     delete[] ppacket;
 
     // We should have location and id now, check if we've seen it before, if not add it to the result set.
-    if (presult->contains(pserver)) {
+    /*if (presult->contains(pserver)) {
       ESP_LOGD(TAG, "Duplicate ID found: %s", pserver->id);
       delete pserver;
       continue;
-    }
+    }*/
 
     fetchDescription(pserver);
     ESP_LOGD(TAG, "Got new server %s", pserver->name);
-    presult->addServer(pserver);
+    (*serverCallback)(pserver);
+    delete pserver;
   }
-
-  return presult;
 }
 
 void classDLNA::handleSearchLine(char *pline, DLNAServer *pserver) {
