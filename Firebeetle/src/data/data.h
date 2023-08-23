@@ -13,11 +13,16 @@ class classData {
  public:
   bool begin();
   void clearAll();
-  int getAlbums(Album **ppresult);
+
+  void storeTrack(Track *ptrack);
+  int getTracks(char *, Track **ppresult);
+
   void storeAlbum(Album *);
   void storeAlbums(Album *palbums, int count);
-  void storeTracks(Track* ptracks, int count);
+  int getAlbums(Album **ppresult);
+
   void dumpDatabase();
+  void dumpTracks();
 };
 
 extern classData Data;

@@ -11,6 +11,7 @@ class classAlbums : public Screen, EventReceiver {
   Album *palbums;
   void showCurrent();
   void handleEncoderEvent(EncoderEvent*);
+  void handleSwitchEvent(SwitchEvent*);
 
  public:
   virtual void activate();

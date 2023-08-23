@@ -32,7 +32,7 @@ bool classData::initDatabase() {
     goto exit;
   }
 
-  rc = sqlite3_exec(database, "CREATE TABLE IF NOT EXISTS tracks (id TEXT PRIMARY KEY, title TEXT, resource TEXT)", NULL, NULL, NULL);
+  rc = sqlite3_exec(database, "CREATE TABLE IF NOT EXISTS tracks (id TEXT PRIMARY KEY, album TEXT, title TEXT, resource TEXT)", NULL, NULL, NULL);
   if (rc != SQLITE_OK) {
     Serial.printf("Can't create tracks table: %s\n", sqlite3_errmsg(database));
     goto exit;
@@ -61,6 +61,81 @@ void classData::clearAll() {
 
 exit:
   return;
+}
+
+void classData::storeTrack(Track *ptrack) {
+  int rc;
+  sqlite3_stmt *stmt;
+
+  rc = sqlite3_prepare_v2(database, "INSERT INTO tracks (id, album, title, resource) VALUES (?, ?, ?, ?)", -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    Serial.printf("Error during album preparation: %s\n", sqlite3_errmsg(database));
+    goto exit;
+  }
+
+  rc = sqlite3_bind_text(stmt, 1, ptrack->id, -1, SQLITE_STATIC);
+  if (rc != SQLITE_OK) {
+    Serial.printf("Error during track id binding: %s\n", sqlite3_errmsg(database));
+    goto exit;
+  }
+
+  rc = sqlite3_bind_text(stmt, 2, ptrack->album, -1, SQLITE_STATIC);
+  if (rc != SQLITE_OK) {
+    Serial.printf("Error during track album binding: %s\n", sqlite3_errmsg(database));
+    goto exit;
+  }
+
+  rc = sqlite3_bind_text(stmt, 3, ptrack->title, -1, SQLITE_STATIC);
+  if (rc != SQLITE_OK) {
+    Serial.printf("Error during track title binding: %s\n", sqlite3_errmsg(database));
+    goto exit;
+  }
+
+  rc = sqlite3_bind_text(stmt, 4, ptrack->resource, -1, SQLITE_STATIC);
+  if (rc != SQLITE_OK) {
+    Serial.printf("Error during track resource binding: %s\n", sqlite3_errmsg(database));
+    goto exit;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    Serial.printf("Error during track step: %s\n", sqlite3_errmsg(database));
+    goto exit;
+  }
+
+exit:
+  sqlite3_finalize(stmt);
+}
+
+int classData::getTracks(char *palbumid, Track **ppresult) {
+  int count, index;
+  sqlite3_stmt *stmt;
+  Track *ptrack;
+
+  count = 0;
+  sqlite3_prepare_v2(database, "SELECT COUNT(*) FROM tracks WHERE album=?", -1, &stmt, NULL);
+  sqlite3_bind_text(stmt, 1, palbumid, -1, SQLITE_STATIC);
+  sqlite3_step(stmt);
+  count = sqlite3_column_int(stmt, 0);
+  sqlite3_finalize(stmt);
+
+  if (count == 0) {
+    return 0;
+  }
+
+  *ppresult = new Track[count];
+  sqlite3_prepare_v2(database, "SELECT id, title, resource FROM tracks WHERE album=? ORDER BY rowid", -1, &stmt, NULL);
+  sqlite3_bind_text(stmt, 1, palbumid, -1, SQLITE_STATIC);
+  index = 0;
+  while (sqlite3_step(stmt) == SQLITE_ROW) {
+    ptrack = (*ppresult) + index++;
+    strlcpy(ptrack->id, (char *)sqlite3_column_text(stmt, 0), ID_SIZE);
+    strlcpy(ptrack->title, (char *)sqlite3_column_text(stmt, 1), TITLE_SIZE);
+    strlcpy(ptrack->resource, (char *)sqlite3_column_text(stmt, 2), RESOURCE_SIZE);
+  }
+  sqlite3_finalize(stmt);
+
+  return count;
 }
 
 int classData::getAlbums(Album **ppresult) {
@@ -96,6 +171,7 @@ exit_count:
     Serial.printf("Error during preparation: ", sqlite3_errmsg(database));
     goto exit_data;
   }
+  index = 0;
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
     palbum = (*ppresult) + index++;
     strlcpy(palbum->id, (char *)sqlite3_column_text(stmt, 0), ID_SIZE);
@@ -178,35 +254,8 @@ void classData::storeAlbums(Album *palbums, int count) {
   }
 }
 
-void classData::storeTracks(Track *ptracks, int count) {
-  int n, rc;
-  Track *ptrack = ptracks;
-
-  String query = "INSERT INTO tracks (id, title, resource) VALUES ";
-
-  for (n = 0; n < count; n++) {
-    query += "('";
-    query += ptrack->id;
-    query += "', '";
-    query += ptrack->title;
-    query += "', '";
-    query += ptrack->resource;
-    query += "')";
-    if (n < count - 1) {
-      query += ", ";
-    }
-
-    ptrack++;
-  }
-
-  rc = sqlite3_exec(database, query.c_str(), NULL, NULL, NULL);
-  if (rc != SQLITE_OK) {
-    Serial.printf("Error inserting tracks: %s\n", sqlite3_errmsg(database));
-  }
-}
-
 void classData::dumpDatabase() {
-  int rc;
+  int rc, count, n;
   sqlite3_stmt *stmt;
 
   rc = sqlite3_prepare_v2(database, "SELECT id, title, artist FROM albums", -1, &stmt, NULL);
@@ -215,15 +264,40 @@ void classData::dumpDatabase() {
     goto exit;
   }
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-    char *id = (char*)sqlite3_column_text(stmt, 0);
-    char *title = (char*)sqlite3_column_text(stmt, 1);
-    char *artist = (char*)sqlite3_column_text(stmt, 2);
-    Serial.printf("ID %s: %s, %s\n", id, title, artist);
+    char *id = (char *)sqlite3_column_text(stmt, 0);
+    char *title = (char *)sqlite3_column_text(stmt, 1);
+    char *artist = (char *)sqlite3_column_text(stmt, 2);
+    Serial.printf("%s by %s\n", title, artist);
+
+    Track *ptracks;
+    count = getTracks(id, &ptracks);
+    if (count > 0) {
+      for (n = 0; n < count; n++) {
+        Serial.printf("  %s\n", (ptracks + n)->title);
+      }
+      delete[] ptracks;
+      Serial.println();
+    }
   }
   if (rc != SQLITE_DONE) {
     Serial.printf("Error during steps: ", sqlite3_errmsg(database));
   }
 
 exit:
+  sqlite3_finalize(stmt);
+}
+
+void classData::dumpTracks() {
+  int rc, count, n;
+  sqlite3_stmt *stmt;
+
+  rc = sqlite3_prepare_v2(database, "SELECT id, album, title, resource FROM tracks ORDER BY rowid", -1, &stmt, NULL);
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    char *id = (char *)sqlite3_column_text(stmt, 0);
+    char *album = (char *)sqlite3_column_text(stmt, 1);
+    char *title = (char *)sqlite3_column_text(stmt, 2);
+    char *resource = (char *)sqlite3_column_text(stmt, 3);
+    Serial.printf("Track id %s for album %s, %s at %s\n", id, album, title, resource);
+  }
   sqlite3_finalize(stmt);
 }
