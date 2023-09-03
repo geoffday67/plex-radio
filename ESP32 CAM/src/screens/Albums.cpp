@@ -4,40 +4,9 @@
 
 #include "../data/data.h"
 #include "Tracks.h"
-#include "utils.h"
+// #include "utils.h"
 
 classAlbums Albums;
-
-Scroll::Scroll(char *ptext, int line) {
-  this->ptext = strdup(ptext);
-  this->line = line;
-}
-
-Scroll::~Scroll() {
-  // vTaskDelete(taskHandle);
-  free(ptext);
-}
-
-void Scroll::begin() {
-  Output.setLine(line, ptext);
-  // this->taskHandle = startTask(scrollCode, "Scroll", this);
-}
-
-void Scroll::scrollCode(void *pdata) {
-  Scroll *pscroll = (Scroll *)pdata;
-  char *ptext = pscroll->ptext;
-  int start, length = strlen(ptext), line = pscroll->line;
-  Serial.printf("Scrolling %s on line %d\n", ptext, line);
-
-  for (start = 0; length - start >= OUTPUT_WIDTH; start++) {
-    Output.setLine(line, ptext + start);
-    vTaskDelay(100);
-  }
-
-  Output.setLine(line, ptext);
-
-  vTaskDelete(NULL);
-}
 
 void classAlbums::activate() {
   int n;
@@ -60,6 +29,9 @@ void classAlbums::activate() {
 
 void classAlbums::deactivate() {
   EventManager.removeListener(this);
+
+  delete pscroll1;
+  delete pscroll2;
 }
 
 bool classAlbums::onEvent(Event *pevent) {
@@ -86,15 +58,25 @@ void classAlbums::handleEncoderEvent(EncoderEvent *pevent) {
 
 void classAlbums::handleSwitchEvent(SwitchEvent *pevent) {
   if (pevent->pressed) {
-    Serial.println("Encoder pressed");
+    Album *palbum = palbums + current;
+    Serial.printf("Encoder pressed on album %s\n", palbum->title);
     this->deactivate();
-    Tracks.setAlbum(palbums + current);
+    Tracks.setAlbum(palbum);
     Tracks.activate();
   }
 }
 
 void classAlbums::showCurrent() {
   Album *palbum = palbums + current;
+
+  Serial.println(palbum->artist);
+  for (int n = 0; n < strlen(palbum->artist); n++) {
+    if (palbum->artist[n] == 0xC3) {
+      palbum->artist[n] = 148;
+    }
+    Serial.printf("[0x%02X]", palbum->artist[n]);
+  }
+  Serial.println();
 
   delete pscroll1;
   pscroll1 = new Scroll(palbum->artist, 0);

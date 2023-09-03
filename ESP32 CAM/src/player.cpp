@@ -48,10 +48,15 @@ int RingBuffer::available() {
   return available;
 }
 
+void RingBuffer::clear() {
+  tail = head;
+}
+
 classPlayer::classPlayer() {
   pVS1053 = 0;
   pBuffer = 0;
   pHttpClient = 0;
+  readHandle = 0;
 }
 
 classPlayer::~classPlayer() {
@@ -76,6 +81,17 @@ bool classPlayer::begin() {
   pVS1053->switchToMp3Mode();
   pVS1053->loadUserCode(PATCH_FLAC, PATCH_FLAC_SIZE);
   pVS1053->setVolume(90);  // TESTING
+
+  // Create a ring buffer and the task to read from it and send to the VS1053.
+  pBuffer = new RingBuffer(3000000);
+  dataHandle = startTask(dataTask, "data", this);
+  Serial.println("Player: Data task created");
+
+  playlistLock = portMUX_INITIALIZER_UNLOCKED;
+  playlisthandle = startTask(playlistTask, "playlist", this);
+  Serial.println("Player: Playlist task created");
+
+  startTask(debugTask, "debug", this);
 
   result = true;
 
@@ -119,9 +135,13 @@ void classPlayer::dataTask(void *pdata) {
       if (pring->tail > pring->size) {
         pring->tail -= pring->size;
       }
-    } else {
-      // vTaskSuspend(NULL);
+
+      if (!pPlayer->isPlaying) {
+        pPlayer->pBuffer->clear();
+        continue;
+      }
     }
+
     taskYIELD();
   }
 }
@@ -136,12 +156,19 @@ void classPlayer::readTask(void *pdata) {
   TaskHandle_t dataHandle;
 
   size = pPlayer->pHttpClient->getSize();
+
   Serial.printf("%ld bytes total\n", size);
   processed = 0;
+  pPlayer->isPlaying = true;
 
   while (processed < size) {
+    if (pPlayer->stopPlay) {
+      break;
+    }
+
     space = pPlayer->pBuffer->space();
     if (space == 0) {
+      vTaskDelay(50);
       continue;
     }
 
@@ -151,7 +178,7 @@ void classPlayer::readTask(void *pdata) {
         Serial.println("Timeout waiting for resource response");
         goto exit;
       }
-      taskYIELD();
+      vTaskDelay(10);
     }
 
     // "count" is the total number of bytes we're going to add to the buffer.
@@ -177,8 +204,7 @@ void classPlayer::readTask(void *pdata) {
       pPlayer->pBuffer->head += count;
     }
 
-    // if (!task_started && pPlayer->pBuffer->head > pPlayer->pBuffer->size / 5) {
-    if (!task_started && pPlayer->pBuffer->available() > 100000) {
+    /*if (!task_started && pPlayer->pBuffer->available() > 100000) {
       xTaskCreatePinnedToCore(
           dataTask,
           "Data task",
@@ -190,7 +216,7 @@ void classPlayer::readTask(void *pdata) {
 
       task_started = true;
       Serial.println("Data task created");
-    }
+    }*/
 
     /*if (task_started) {
       vTaskResume(dataHandle);
@@ -204,14 +230,11 @@ void classPlayer::readTask(void *pdata) {
 
 exit:
   pPlayer->pHttpClient->end();
+  Serial.println("Finished playing");
+  pPlayer->isPlaying = false;
 
   // TODO Wait for buffer to be empty then delete the task.
-  /*if (task_started) {
-    vTaskDelete(dataHandle);
-  }*/
   vTaskDelete(NULL);
-
-  Serial.println("Finished playing");
 }
 
 void classPlayer::debugTask(void *pdata) {
@@ -223,51 +246,91 @@ void classPlayer::debugTask(void *pdata) {
   }
 }
 
-void classPlayer::play(char *purl) {
+// Start playing a track by requesting data from the server and creating a task to keep reading it into the ring buffer.
+void classPlayer::startPlay() {
   wifiWait();
   Serial.println("WiFi ready");
   playerWait();
   Serial.println("Player ready");
 
-  pBuffer = new RingBuffer(3000000);
+  // Stop any existing play before starting the new one.
+  if (isPlaying) {
+    stopPlay = true;
+    while (isPlaying) {
+      vTaskDelay(10);
+    }
+    pBuffer->clear();
+  }
 
-  Serial.printf("Requesting track from %s\n", purl);
+  Serial.printf("Requesting track %s from %s\n", currentTrack.title, currentTrack.resource);
   pHttpClient = new HTTPClient;
   pHttpClient->setReuse(false);
-  pHttpClient->begin(wifiClient, purl);
+  pHttpClient->begin(wifiClient, currentTrack.resource);
   int code = pHttpClient->GET();
+  Serial.printf("Got code %d loading resource\n", code);
   if (code != 200) {
-    Serial.printf("Got code %d loading resource\n", code);
     goto exit;
   }
 
-  /*xTaskCreatePinnedToCore(
-      dataTask,
-      "Data task",
-      ARDUINO_STACK,
-      this,
-      ARDUINO_PRIORITY,
-      NULL,
-      ARDUINO_CORE);*/
-
-  xTaskCreatePinnedToCore(
-      readTask,
-      "Read task",
-      ARDUINO_STACK,
-      this,
-      ARDUINO_PRIORITY,
-      NULL,
-      ARDUINO_CORE);
-
-  /*xTaskCreatePinnedToCore(
-      debugTask,
-      "Debug task",
-      ARDUINO_STACK,
-      this,
-      ARDUINO_PRIORITY,
-      NULL,
-      ARDUINO_CORE);*/
+  stopPlay = false;
+  startTask(readTask, "read", this);
 
 exit:
   return;
+}
+
+/*
+Keep a playlist as a queue of tracks. Play the next track when one is finished (maybe with pause).
+*/
+
+void classPlayer::playlistTask(void *pdata) {
+  classPlayer *pplayer = (classPlayer *)pdata;
+
+  while (1) {
+    // Only start a track playing if there isn't one already playing (TODO), and the queue isn't empty.
+    taskENTER_CRITICAL(&pplayer->playlistLock);
+
+    if (pplayer->playlist.size() == 0) {
+      taskEXIT_CRITICAL(&pplayer->playlistLock);
+      vTaskSuspend(NULL);
+      continue;
+    }
+
+    pplayer->currentTrack = pplayer->playlist.front();
+    pplayer->playlist.pop();
+    taskEXIT_CRITICAL(&pplayer->playlistLock);
+
+    pplayer->startPlay();
+  }
+}
+
+void classPlayer::addToPlaylist(Track *ptrack) {
+  taskENTER_CRITICAL(&playlistLock);
+  playlist.push(*ptrack);
+  taskEXIT_CRITICAL(&playlistLock);
+  vTaskResume(playlisthandle);
+}
+
+void classPlayer::clearPlaylist() {
+  taskENTER_CRITICAL(&playlistLock);
+  while (playlist.size() > 0) {
+    playlist.pop();
+  }
+  taskEXIT_CRITICAL(&playlistLock);
+}
+
+void classPlayer::resetPlaylist(Track *ptrack) {
+  taskENTER_CRITICAL(&playlistLock);
+  clearPlaylist();
+  addToPlaylist(ptrack);
+  taskEXIT_CRITICAL(&playlistLock);
+}
+
+void classPlayer::stop() {
+  if (isPlaying) {
+    stopPlay = true;
+    while (isPlaying) {
+      vTaskDelay(10);
+    }
+  }
 }

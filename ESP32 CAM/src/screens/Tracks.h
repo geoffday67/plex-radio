@@ -5,6 +5,7 @@
 #include "EventManager.h"
 #include "EventReceiver.h"
 #include "Screen.h"
+#include "Scroll.h"
 
 class classTracks : public Screen, EventReceiver {
  private:
@@ -15,6 +16,7 @@ class classTracks : public Screen, EventReceiver {
   void handleEncoderEvent(EncoderEvent *);
   void handleSwitchEvent(SwitchEvent *);
   void handleBackEvent(BackEvent *);
+  Scroll *pscroll1, *pscroll2;
 
  public:
   void setAlbum(Album *);

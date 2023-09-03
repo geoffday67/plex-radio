@@ -4,19 +4,7 @@
 #include "EventManager.h"
 #include "EventReceiver.h"
 #include "Screen.h"
-
-class Scroll {
- private:
-  static void scrollCode(void*);
-
- public:
-  Scroll(char* ptext, int line);
-  ~Scroll();
-  void begin();
-  char* ptext;
-  int line;
-  TaskHandle_t taskHandle;
-};
+#include "Scroll.h"
 
 class classAlbums : public Screen, EventReceiver {
  private:

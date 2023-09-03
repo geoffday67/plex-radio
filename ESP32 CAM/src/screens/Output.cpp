@@ -6,6 +6,7 @@ classOutput Output;
 
 classOutput::classOutput() {
   pdisplay = new LiquidCrystal_I2C(0x27, OUTPUT_WIDTH, OUTPUT_HEIGHT);
+  mutex = xSemaphoreCreateMutex();
 }
 
 classOutput::~classOutput() {}
@@ -16,8 +17,11 @@ void classOutput::begin() {
 }
 
 void classOutput::addText(int x, int y, const char *ptext) {
-  pdisplay->setCursor(x, y);
-  pdisplay->print(ptext);
+  if (xSemaphoreTake(mutex, 2000 * portTICK_PERIOD_MS) == pdTRUE) {
+      pdisplay->setCursor(x, y);
+      pdisplay->print(ptext);
+      xSemaphoreGive(mutex);
+    }
 }
 
 void classOutput::setLine(int y, const char *ptext) {

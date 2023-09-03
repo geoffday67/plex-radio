@@ -229,6 +229,53 @@ void refreshData() {
   Data.dumpDatabase();
 }
 
+#include <queue>
+
+class Thing {
+ public:
+  Thing(int value) : value(value) {}
+  Thing(const Thing &);
+  int value;
+};
+
+Thing::Thing(const Thing &source) {
+  Serial.println("Thing copy constructor");
+  this->value = source.value;
+}
+
+void queueTask(void *pdata) {
+  std::queue<Thing> *pqueue = (std::queue<Thing> *)pdata;
+
+  while (1) {
+    if (pqueue->size() == 0) {
+      vTaskSuspend(NULL);
+      continue;
+    }
+
+    Serial.println(pqueue->front().value);
+    pqueue->pop();
+  }
+}
+
+void stltest() {
+  static std::queue<Thing> queue;
+
+  TaskHandle_t handle = startTask(queueTask, "queue", &queue);
+
+  Thing *pt = new Thing(1);
+  queue.push(*pt);
+  delete pt;
+  pt = new Thing(2);
+  queue.push(*pt);
+  delete pt;
+  pt = new Thing(3);
+  queue.push(*pt);
+  delete pt;
+  
+  delay(1000);
+  vTaskResume(handle);
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println();
@@ -258,6 +305,9 @@ void setup() {
   pinMode(BACK_LIGHT, OUTPUT);
   Serial.println("Buttons initialised");
 
+  Albums.activate();
+  return;
+
   SPI.begin();
   Serial.println("SPI initialised");
 
@@ -271,11 +321,11 @@ void setup() {
   DLNA.findServers(onServerFound);
   Serial.printf("Plex server name: %s\n\n", pPlex->name);*/
 
-  //startTask(backTask, "back");
+  // startTask(backTask, "back");
 
   Albums.activate();
   digitalWrite(BACK_LIGHT, HIGH);
-  
+
   // refreshData();
   // Data.dumpDatabase();
 }

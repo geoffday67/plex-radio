@@ -8,6 +8,7 @@
 class classOutput {
  private:
   LiquidCrystal_I2C *pdisplay;
+  SemaphoreHandle_t mutex;
 
  public:
   classOutput();

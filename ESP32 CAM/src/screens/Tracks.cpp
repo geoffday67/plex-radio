@@ -21,13 +21,19 @@ void classTracks::activate() {
 
   count = Data.getTracks(pAlbum->id, &ptracks);
   current = 0;
-  Output.setLine(0, pAlbum->title);
+
+  pscroll1 = new Scroll(pAlbum->title, 0);
+  pscroll1->begin();
+  pscroll2 = 0;
+
   showCurrent();
 }
 
 void classTracks::deactivate() {
   EventManager.removeListener(this);
 
+  delete pscroll1;
+  delete pscroll2;
   delete[] ptracks;
 }
 
@@ -56,8 +62,9 @@ void classTracks::handleEncoderEvent(EncoderEvent *pevent) {
 void classTracks::handleSwitchEvent(SwitchEvent *pevent) {
   if (pevent->pressed) {
     Track *ptrack = ptracks + current;
-    Player.play(ptrack->resource);
-    Serial.printf("Encoder pressed on track %s\n", ptrack->resource);
+    // Player.play(ptrack->resource);
+    Serial.printf("Encoder pressed on track %s\n", ptrack->title);
+    Player.resetPlaylist(ptrack);
   }
 }
 
@@ -71,5 +78,8 @@ void classTracks::handleBackEvent(BackEvent *pevent) {
 
 void classTracks::showCurrent() {
   Track *ptrack = ptracks + current;
-  Output.setLine(1, ptrack->title);
+
+  delete pscroll2;
+  pscroll2 = new Scroll(ptrack->title, 1);
+  pscroll2->begin();
 }

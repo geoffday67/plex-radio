@@ -3,6 +3,9 @@
 #include <HTTPClient.h>
 #include <VS1053.h>
 
+#include <queue>
+
+#include "data/track.h"
 #include "vs1053b-patches-flac.h"
 
 #define VS1053_CS 13
@@ -20,6 +23,7 @@ class RingBuffer {
   int available();
   byte *pHead() { return pData + head; }
   byte *pTail() { return pData + tail; }
+  void clear();
 };
 
 class Chunk {
@@ -35,18 +39,31 @@ class classPlayer {
   VS1053 *pVS1053;
   RingBuffer *pBuffer;
   HTTPClient *pHttpClient;
+  std::queue<Track> playlist;
+  TaskHandle_t playlisthandle;
+  TaskHandle_t readHandle;
+  TaskHandle_t dataHandle;
+  portMUX_TYPE playlistLock;
+  Track currentTrack;
+  bool isPlaying, stopPlay;
 
   static void dataTask(void *);
   static void readTask(void *);
   static void debugTask(void *);
+  static void playlistTask(void *);
+
+  void startPlay();
 
  public:
   classPlayer();
   ~classPlayer();
   bool begin();
-  void play(char *);
   void playFile(char *);
   void setVolume(int);
+  void addToPlaylist(Track *);
+  void clearPlaylist();
+  void resetPlaylist(Track *);
+  void stop();
 };
 
 extern classPlayer Player;
