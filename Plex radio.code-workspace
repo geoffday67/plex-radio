@@ -14,6 +14,14 @@
     {
       "name": "ESP32 CAM",
       "path": "ESP32 CAM"
+    },
+    {
+      "name": "SPI Test",
+      "path": "SPI Test"
+    },
+    {
+      "name": "IDF Test",
+      "path": "IDF Test"
     }
   ],
   "settings": {

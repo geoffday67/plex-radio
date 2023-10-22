@@ -19,6 +19,7 @@ void classAlbums::activate() {
 
   if (!palbums) {
     count = Data.getAlbums(&palbums);
+    Serial.printf("%d albums fetched\n", count);
     current = 0;
   }
 
@@ -69,14 +70,14 @@ void classAlbums::handleSwitchEvent(SwitchEvent *pevent) {
 void classAlbums::showCurrent() {
   Album *palbum = palbums + current;
 
-  Serial.println(palbum->artist);
+  /*Serial.println(palbum->artist);
   for (int n = 0; n < strlen(palbum->artist); n++) {
     if (palbum->artist[n] == 0xC3) {
       palbum->artist[n] = 148;
     }
     Serial.printf("[0x%02X]", palbum->artist[n]);
   }
-  Serial.println();
+  Serial.println();*/
 
   delete pscroll1;
   pscroll1 = new Scroll(palbum->artist, 0);

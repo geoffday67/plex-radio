@@ -271,7 +271,7 @@ void stltest() {
   pt = new Thing(3);
   queue.push(*pt);
   delete pt;
-  
+
   delay(1000);
   vTaskResume(handle);
 }
@@ -284,6 +284,8 @@ void setup() {
   Output.begin();
   Serial.println("Output initialised");
   Output.addText(0, 0, "Starting...");
+
+  return;
 
   if (SPIFFS.begin(true)) {
     Serial.println("SPIFFS initialised");
@@ -305,9 +307,6 @@ void setup() {
   pinMode(BACK_LIGHT, OUTPUT);
   Serial.println("Buttons initialised");
 
-  Albums.activate();
-  return;
-
   SPI.begin();
   Serial.println("SPI initialised");
 
@@ -317,18 +316,31 @@ void setup() {
   wifiBegin();
   Serial.println("WiFi initialisation started");
 
+  playerWait();
+  wifiWait();
+  Track test;
+  strcpy(test.id, "123");
+  strcpy(test.album, "Test album");
+  strcpy(test.title, "Test track");
+  // strcpy(test.resource, "http://192.168.68.106:32469/object/8759b6af55861818f5c0/file.flac");
+  strcpy(test.resource, "http://192.168.68.106:32469/object/f647173920a634673f22/file.flac");
+  // strcpy(test.resource, "http://192.168.68.106:32469/object/3af33f13d6d2c1eb5cd5/file.flac");
+  Player.addToPlaylist(&test);
+
   /*Serial.println("Finding servers");
   DLNA.findServers(onServerFound);
   Serial.printf("Plex server name: %s\n\n", pPlex->name);*/
 
   // startTask(backTask, "back");
 
-  Albums.activate();
+  // Albums.activate();
   digitalWrite(BACK_LIGHT, HIGH);
 
   // refreshData();
   // Data.dumpDatabase();
 }
+
+int volume = 100;
 
 void loop() {
   int direction;
@@ -337,7 +349,10 @@ void loop() {
   backDebouncer.loop();
 
   if (direction = encoder.getDirection()) {
-    EventManager.queueEvent(new EncoderEvent(direction));
+    // EventManager.queueEvent(new EncoderEvent(direction));
+    /*volume += direction;
+    Serial.printf ("Volume now %d\n", volume);
+    Player.setVolume(volume);*/
   }
 
   EventManager.processEvents();

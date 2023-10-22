@@ -68,8 +68,12 @@ classPlayer::~classPlayer() {
 bool classPlayer::begin() {
   bool result = false;
 
+  pinMode(VS1053_RESET, OUTPUT);
+  digitalWrite(VS1053_RESET, LOW);
+  delay(10);
+  digitalWrite(VS1053_RESET, HIGH);
+  delay(10);
   pVS1053 = new VS1053(VS1053_CS, VS1053_DCS, VS1053_DREQ);
-
   pVS1053->begin();
 
   if (pVS1053->isChipConnected()) {
@@ -80,7 +84,7 @@ bool classPlayer::begin() {
 
   pVS1053->switchToMp3Mode();
   pVS1053->loadUserCode(PATCH_FLAC, PATCH_FLAC_SIZE);
-  pVS1053->setVolume(90);  // TESTING
+  pVS1053->setVolume(100);  // TESTING
 
   // Create a ring buffer and the task to read from it and send to the VS1053.
   pBuffer = new RingBuffer(3000000);
@@ -91,7 +95,7 @@ bool classPlayer::begin() {
   playlisthandle = startTask(playlistTask, "playlist", this);
   Serial.println("Player: Playlist task created");
 
-  startTask(debugTask, "debug", this);
+  // startTask(debugTask, "debug", this);
 
   result = true;
 

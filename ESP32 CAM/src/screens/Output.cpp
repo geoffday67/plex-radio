@@ -2,6 +2,9 @@
 
 #include "../utils.h"
 
+#define SDA_PIN 13
+#define SCL_PIN 27
+
 classOutput Output;
 
 classOutput::classOutput() {
@@ -12,16 +15,16 @@ classOutput::classOutput() {
 classOutput::~classOutput() {}
 
 void classOutput::begin() {
-  pdisplay->init();
+  pdisplay->init(SDA_PIN, SCL_PIN);
   pdisplay->backlight();
 }
 
 void classOutput::addText(int x, int y, const char *ptext) {
   if (xSemaphoreTake(mutex, 2000 * portTICK_PERIOD_MS) == pdTRUE) {
-      pdisplay->setCursor(x, y);
-      pdisplay->print(ptext);
-      xSemaphoreGive(mutex);
-    }
+    pdisplay->setCursor(x, y);
+    pdisplay->print(ptext);
+    xSemaphoreGive(mutex);
+  }
 }
 
 void classOutput::setLine(int y, const char *ptext) {
@@ -31,4 +34,10 @@ void classOutput::setLine(int y, const char *ptext) {
   line[OUTPUT_WIDTH] = 0;
   memcpy(line, ptext, MIN(strlen(ptext), OUTPUT_WIDTH));
   addText(0, y, line);
+}
+
+void classOutput::clear() {
+  if (xSemaphoreTake(mutex, 2000 * portTICK_PERIOD_MS) == pdTRUE) {
+    pdisplay->clear();
+  }
 }

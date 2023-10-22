@@ -8,9 +8,10 @@
 #include "data/track.h"
 #include "vs1053b-patches-flac.h"
 
-#define VS1053_CS 13
-#define VS1053_DCS 25
-#define VS1053_DREQ 26
+#define VS1053_CS 21
+#define VS1053_DCS 22
+#define VS1053_DREQ 15
+#define VS1053_RESET 4
 
 class RingBuffer {
  public:
@@ -58,7 +59,6 @@ class classPlayer {
   classPlayer();
   ~classPlayer();
   bool begin();
-  void playFile(char *);
   void setVolume(int);
   void addToPlaylist(Track *);
   void clearPlaylist();

@@ -2,6 +2,8 @@
 
 #include <SPIFFS.h>
 
+#include "settings.h"
+
 classData Data;
 
 bool classData::begin() {
@@ -26,6 +28,8 @@ bool classData::initDatabase() {
     goto exit;
   }
 
+  // TODO Add collation to columns during creation rather than during fetching.
+  // Might also fix the problem of not using custom collation.
   rc = sqlite3_exec(database, "CREATE TABLE IF NOT EXISTS albums (id TEXT, title TEXT, artist TEXT)", NULL, NULL, NULL);
   // rc = sqlite3_exec(database, "CREATE TABLE IF NOT EXISTS albums (id TEXT PRIMARY KEY, title TEXT, artist TEXT)", NULL, NULL, NULL);
   if (rc != SQLITE_OK) {
@@ -40,10 +44,21 @@ bool classData::initDatabase() {
     goto exit;
   }
 
+  /*rc = sqlite3_create_collation(database, "NATURAL", SQLITE_UTF8, NULL, collateNatural);
+  if (rc != SQLITE_OK) {
+    Serial.printf("Can't create collation: %s\n", sqlite3_errmsg(database));
+    goto exit;
+  }*/
+
   result = true;
 
 exit:
   return result;
+}
+
+int classData::collateNatural(void *pdata, int length1, const void *pstring1, int length2, const void *pstring2) {
+  Serial.printf("Collation called with lengths %d and %d\n", length1, length2);
+  return length1 - length2;
 }
 
 void classData::clearAll() {
@@ -168,7 +183,11 @@ exit_count:
 
   // Allocate space and get the albums themselves.
   *ppresult = new Album[count];
-  rc = sqlite3_prepare_v2(database, "SELECT id, title, artist FROM albums", -1, &stmt, NULL);
+  if (Settings.getSortOrder() == SortOrder::Artist) {
+    rc = sqlite3_prepare_v2(database, "SELECT id, title, artist FROM albums ORDER BY artist", -1, &stmt, NULL);
+  } else {
+    rc = sqlite3_prepare_v2(database, "SELECT id, title, artist FROM albums ORDER BY title", -1, &stmt, NULL);
+  }
   if (rc != SQLITE_OK) {
     Serial.printf("Error during preparation: ", sqlite3_errmsg(database));
     goto exit_data;

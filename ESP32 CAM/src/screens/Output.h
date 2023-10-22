@@ -16,6 +16,7 @@ class classOutput {
   virtual void begin();
   virtual void addText(int x, int y, const char *ptext);
   virtual void setLine(int y, const char *ptext);
+  virtual void clear();
 };
 
 extern classOutput Output;
