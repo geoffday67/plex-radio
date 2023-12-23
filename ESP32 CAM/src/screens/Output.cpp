@@ -3,7 +3,7 @@
 #include "../utils.h"
 
 #define SDA_PIN 13
-#define SCL_PIN 27
+#define SCL_PIN 14
 
 classOutput Output;
 

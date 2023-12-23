@@ -1,55 +1,117 @@
 #include <Arduino.h>
+#include <SPIFFS.h>
 
 #include "driver/spi_master.h"
+#include "esp_http_client.h"
+#include "esp_wifi.h"
+#include "vs1053b.h"
+#include "esp_log.h"
+
+#include <esp32_wifi/wifi.h>
+
+#define VS1053_CS 21
+#define VS1053_DCS 22
+#define VS1053_RESET 4
+#define VS1053_DREQ 15
+
+#define VSPI_MOSI 23
+#define VSPI_MISO 19
+#define VSPI_CLK 18
+
+VS1053b vs1053b(VS1053_CS, VS1053_DCS, VS1053_DREQ, VS1053_RESET);
+const EventBits_t WIFI_CONNECTED_BIT = 0x01;
+EventGroupHandle_t plexRadioGroup;
+ESP32Wifi network;
+
+void listFiles() {
+  File root = SPIFFS.open("/");
+
+  File file = root.openNextFile();
+
+  while (file) {
+    Serial.print("File: ");
+    Serial.println(file.name());
+
+    file = root.openNextFile();
+  }
+}
+
+esp_err_t httpEventHandler(esp_http_client_event_t *evt) {
+  return ESP_OK;
+}
+
+void startHttp() {
+  esp_http_client_handle_t httpClient;
+  esp_http_client_config_t httpConfig;
+  int length, n;
+
+  memset(&httpConfig, 0, sizeof httpConfig);
+  httpConfig.url = "http://eo1thmnievwbew4.m.pipedream.net";
+  httpConfig.user_agent = "ESP32";
+  httpConfig.method = HTTP_METHOD_GET;
+  httpConfig.event_handler = httpEventHandler;
+  httpClient = esp_http_client_init(&httpConfig);
+
+  esp_http_client_open(httpClient, 0);
+  length = esp_http_client_fetch_headers(httpClient);
+  Serial.printf("Status code %d\n", esp_http_client_get_status_code(httpClient));
+  Serial.printf("Content length %d\n", length);
+  char *presponse = new char[length + 1];
+  n = esp_http_client_read(httpClient, presponse, length);
+  Serial.printf("%d bytes read\n", n);
+  presponse[length] = 0;
+  Serial.print(presponse);
+  esp_http_client_close(httpClient);
+  esp_http_client_cleanup(httpClient);
+}
 
 void setup() {
-  esp_err_t e;
+  int n;
   spi_bus_config_t config;
   spi_device_interface_config_t dev_config;
-  spi_device_handle_t handle;
   spi_transaction_t transaction;
-  byte received[32];
+  uint16_t value;
+  wifi_init_config_t wifiInitConfig;
 
   Serial.begin(115200);
   Serial.println();
   Serial.println("Starting");
 
-  // Setup SPI bus, send command to get chip version, get response.
-  // Read register 0x01, bits 7 - 4 as the version (register is 16 bits total).
-  // MOSI = 23, MISO = 19 => SPI3.
+  plexRadioGroup = xEventGroupCreate();
+  esp_event_loop_create_default();
+  network.start(plexRadioGroup, WIFI_CONNECTED_BIT);
+
+  EventBits_t bits;
+  bits = xEventGroupWaitBits(plexRadioGroup, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, pdMS_TO_TICKS(5000));
+  if ((bits & WIFI_CONNECTED_BIT) == 0) {
+    return;
+  }
+
+  startHttp();
+
+  return;
+
+  if (SPIFFS.begin(true)) {
+    Serial.println("SPIFFS initialised");
+  } else {
+    Serial.println("Error initialising SPIFFS");
+  }
+  Serial.printf("Total bytes in file system: %d\n", SPIFFS.totalBytes());
+  listFiles();
+
+  // Setup SPI bus.
+  // Setting these pins to -1 possibly should make them default to IO_MUX direct usage but that doesn't seem to work.
   memset(&config, 0, sizeof config);
-  config.mosi_io_num = -1;
-  config.miso_io_num = -1;
-  config.sclk_io_num = -1;
-  e = spi_bus_initialize(SPI3_HOST, &config, SPI_DMA_DISABLED);
-  Serial.printf("Bus initialise returned %d\n", e);
+  config.mosi_io_num = VSPI_MOSI;
+  config.miso_io_num = VSPI_MISO;
+  config.sclk_io_num = VSPI_CLK;
+  spi_bus_initialize(SPI3_HOST, &config, SPI_DMA_DISABLED);
 
-  memset(&dev_config, 0, sizeof dev_config);
-  dev_config.command_bits = 8;
-  dev_config.address_bits = 8;
-  dev_config.mode = 0;
-  dev_config.clock_speed_hz = 100000;
-  dev_config.spics_io_num = 13;
-  dev_config.queue_size = 1;
-  e = spi_bus_add_device(SPI3_HOST, &dev_config, &handle);
-  Serial.printf("Add device returned %d\n", e);
+  vs1053b.begin();
+  Serial.printf("Version %d\n", vs1053b.getVersion());
 
-  memset(&transaction, 0, sizeof transaction);
-  transaction.cmd = 0x03;
-  transaction.addr = 0x01;
-  transaction.length = 16;
-  transaction.rxlength = 16;
-  transaction.rx_buffer = received;
-  e = spi_device_transmit(handle, &transaction);
-  Serial.printf("Transmit returned %d\n", e);
-
-
-
-  e = spi_bus_remove_device(handle);
-  Serial.printf("Remove device returned %d\n", e);
-
-  spi_bus_free(SPI3_HOST);
-  Serial.printf("Bus free returned %d\n", e);
+  vs1053b.playFile();
+  Serial.println("Song complete");
 }
 
 void loop() {

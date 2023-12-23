@@ -20,13 +20,35 @@
 #define ENCODER_CLK 34
 #define ENCODER_DT 39
 #define ENCODER_BUTTON 36
-#define BACK_BUTTON 32
-#define BACK_LIGHT 33
+
+#define BACK_BUTTON 33
+
+#define PLAY_BUTTON 35
+#define PLAY_LIGHT 32
+
+#define STOP_BUTTON 26
+#define STOP_LIGHT 27
 
 WiFiClient wifiClient;
 volatile bool wifiConnected = false;
 volatile bool playerReady = false;
 Rotary encoder(ENCODER_CLK, ENCODER_DT, ENCODER_BUTTON);
+
+void showPlay(bool show) {
+  if (show) {
+    digitalWrite(PLAY_LIGHT, HIGH);
+  } else {
+    digitalWrite(PLAY_LIGHT, LOW);
+  }
+}
+
+void showStop(bool show) {
+  if (show) {
+    digitalWrite(STOP_LIGHT, HIGH);
+  } else {
+    digitalWrite(STOP_LIGHT, LOW);
+  }
+}
 
 int getEncoder() {
   return digitalRead(ENCODER_BUTTON);
@@ -39,14 +61,34 @@ void encoderChanged(int value) {
 Debouncer encoderDebouncer(getEncoder, encoderChanged, 100);
 
 int getBackValue() {
-  return digitalRead(BACK_BUTTON);
+  return digitalRead(BACK_BUTTON) == 0;
 }
 
 void backChanged(int value) {
-  EventManager.queueEvent(new BackEvent(value == 0));
+  EventManager.queueEvent(new BackEvent(value));
 }
 
-Debouncer backDebouncer(getBackValue, backChanged, 100);
+Debouncer *pBackDebouncer;
+
+int getPlayValue() {
+  return digitalRead(PLAY_BUTTON) == 0;
+}
+
+void playChanged(int value) {
+  Serial.printf("Play button %d\n", value);
+}
+
+Debouncer *pPlayDebouncer;
+
+int getStopValue() {
+  return digitalRead(STOP_BUTTON) == 0;
+}
+
+void stopChanged(int value) {
+  Serial.printf("Stop button %d\n", value);
+}
+
+Debouncer *pStopDebouncer;
 
 void playerBeginTask(void *pdata) {
   if (Player.begin()) {
@@ -229,53 +271,6 @@ void refreshData() {
   Data.dumpDatabase();
 }
 
-#include <queue>
-
-class Thing {
- public:
-  Thing(int value) : value(value) {}
-  Thing(const Thing &);
-  int value;
-};
-
-Thing::Thing(const Thing &source) {
-  Serial.println("Thing copy constructor");
-  this->value = source.value;
-}
-
-void queueTask(void *pdata) {
-  std::queue<Thing> *pqueue = (std::queue<Thing> *)pdata;
-
-  while (1) {
-    if (pqueue->size() == 0) {
-      vTaskSuspend(NULL);
-      continue;
-    }
-
-    Serial.println(pqueue->front().value);
-    pqueue->pop();
-  }
-}
-
-void stltest() {
-  static std::queue<Thing> queue;
-
-  TaskHandle_t handle = startTask(queueTask, "queue", &queue);
-
-  Thing *pt = new Thing(1);
-  queue.push(*pt);
-  delete pt;
-  pt = new Thing(2);
-  queue.push(*pt);
-  delete pt;
-  pt = new Thing(3);
-  queue.push(*pt);
-  delete pt;
-
-  delay(1000);
-  vTaskResume(handle);
-}
-
 void setup() {
   Serial.begin(115200);
   Serial.println();
@@ -284,8 +279,6 @@ void setup() {
   Output.begin();
   Serial.println("Output initialised");
   Output.addText(0, 0, "Starting...");
-
-  return;
 
   if (SPIFFS.begin(true)) {
     Serial.println("SPIFFS initialised");
@@ -304,8 +297,20 @@ void setup() {
   Serial.println("Encoder initialised");
 
   pinMode(BACK_BUTTON, INPUT_PULLUP);
-  pinMode(BACK_LIGHT, OUTPUT);
-  Serial.println("Buttons initialised");
+  pBackDebouncer = new Debouncer(getBackValue, backChanged, 100);
+  Serial.println("Back button initialised");
+
+  pinMode(PLAY_BUTTON, INPUT);
+  pinMode(PLAY_LIGHT, OUTPUT);
+  showPlay(true);
+  pPlayDebouncer = new Debouncer(getPlayValue, playChanged, 100);
+  Serial.println("Play button initialised");
+
+  pinMode(STOP_BUTTON, INPUT);
+  pinMode(STOP_LIGHT, OUTPUT);
+  showStop(true);
+  pStopDebouncer = new Debouncer(getStopValue, stopChanged, 100);
+  Serial.println("Stop button initialised");
 
   SPI.begin();
   Serial.println("SPI initialised");
@@ -326,33 +331,29 @@ void setup() {
   strcpy(test.resource, "http://192.168.68.106:32469/object/f647173920a634673f22/file.flac");
   // strcpy(test.resource, "http://192.168.68.106:32469/object/3af33f13d6d2c1eb5cd5/file.flac");
   Player.addToPlaylist(&test);
+  return;
 
-  /*Serial.println("Finding servers");
+  wifiWait();
+  Serial.println("Finding servers");
   DLNA.findServers(onServerFound);
-  Serial.printf("Plex server name: %s\n\n", pPlex->name);*/
+  Serial.printf("Plex server name: %s\n\n", pPlex->name);
 
-  // startTask(backTask, "back");
-
-  // Albums.activate();
-  digitalWrite(BACK_LIGHT, HIGH);
+  Albums.activate();
 
   // refreshData();
   // Data.dumpDatabase();
 }
 
-int volume = 100;
-
 void loop() {
   int direction;
 
   encoderDebouncer.loop();
-  backDebouncer.loop();
+  pBackDebouncer->loop();
+  pPlayDebouncer->loop();
+  pStopDebouncer->loop();
 
   if (direction = encoder.getDirection()) {
-    // EventManager.queueEvent(new EncoderEvent(direction));
-    /*volume += direction;
-    Serial.printf ("Volume now %d\n", volume);
-    Player.setVolume(volume);*/
+    EventManager.queueEvent(new EncoderEvent(direction));
   }
 
   EventManager.processEvents();

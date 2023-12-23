@@ -22,6 +22,9 @@
     {
       "name": "IDF Test",
       "path": "IDF Test"
+    },
+    {
+      "path": "../Arduino library/ESP32"
     }
   ],
   "settings": {
