@@ -2,9 +2,8 @@
 #include <Debouncer.h>
 #include <SPI.h>
 #include <SPIFFS.h>
-#include <WiFi.h>
 #include <driver/adc.h>
-#include <esp_wifi.h>
+#include <esp32_wifi/wifi.h>
 
 #include <regex>
 
@@ -29,8 +28,10 @@
 #define STOP_BUTTON 26
 #define STOP_LIGHT 27
 
-WiFiClient wifiClient;
-volatile bool wifiConnected = false;
+const EventBits_t WIFI_CONNECTED_BIT = 0x01;
+EventGroupHandle_t plexRadioGroup;
+ESP32Wifi network;
+
 volatile bool playerReady = false;
 Rotary encoder(ENCODER_CLK, ENCODER_DT, ENCODER_BUTTON);
 
@@ -118,79 +119,18 @@ void playerWait() {
   }
 }
 
-void connectWiFiTask(void *pdata) {
-  unsigned long start;
-  int count, n, max_rssi, network;
-
-  // Wait for scan to be finished.
-  while ((count = WiFi.scanComplete()) < 0) {
-    vTaskDelay(10);
-  }
-
-  Serial.printf("%d networks found\n", count);
-  for (n = 0; n < count; n++) {
-    Serial.printf("%d: RSSI = %d, SSID = %s, BSSID = %s\n", n, WiFi.RSSI(n), WiFi.SSID(n).c_str(), WiFi.BSSIDstr(n).c_str());
-  }
-
-  max_rssi = -999;
-  network = -1;
-  for (n = 0; n < count; n++) {
-    if (WiFi.RSSI(n) > max_rssi) {
-      max_rssi = WiFi.RSSI(n);
-      network = n;
-    }
-  }
-  if (network == -1) {
-    Serial.println("No usable network found");
-    goto exit;
-  }
-
-  WiFi.mode(WIFI_STA);
-  WiFi.persistent(false);
-  WiFi.disconnect();
-  WiFi.hostname("Plex radio");
-  esp_wifi_set_ps(WIFI_PS_NONE);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    WiFi.begin("Wario", "mansion1", WiFi.channel(network), WiFi.BSSID(network));
-    Serial.println("Connecting WiFi");
-
-    start = millis();
-    while (WiFi.status() != WL_CONNECTED) {
-      if (millis() - start > 5000) {
-        Serial.println("Timed out connecting to access point");
-        break;
-      }
-      delay(100);
-    }
-  }
-
-  Serial.printf("Connected as %s to access point %s\n", WiFi.localIP().toString().c_str(), WiFi.BSSIDstr().c_str());
-  wifiConnected = true;
-
-exit:
-  vTaskDelete(NULL);
-}
-
 void wifiBegin() {
-  // Scan for networks we know and pick the strongest signal.
-  WiFi.scanNetworks(true, false, false, 100, 0, "Wario");
-
-  xTaskCreatePinnedToCore(
-      connectWiFiTask,
-      "Connect WiFi",
-      ARDUINO_STACK,
-      NULL,
-      ARDUINO_PRIORITY,
-      NULL,
-      ARDUINO_CORE);
+  network.start(plexRadioGroup, WIFI_CONNECTED_BIT);
 }
 
-void wifiWait() {
-  while (!wifiConnected) {
-    delay(250);
+bool wifiWait() {
+  EventBits_t bits;
+  bits = xEventGroupWaitBits(plexRadioGroup, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, pdMS_TO_TICKS(5000));
+  if ((bits & WIFI_CONNECTED_BIT) == 0) {
+    return false;
   }
-  // TODO Add timeout
+
+  return true;
 }
 
 DLNAServer *pPlex;
@@ -280,6 +220,10 @@ void setup() {
   Serial.println("Output initialised");
   Output.addText(0, 0, "Starting...");
 
+  plexRadioGroup = xEventGroupCreate();
+  esp_event_loop_create_default();
+  Serial.println("Event group created");
+
   if (SPIFFS.begin(true)) {
     Serial.println("SPIFFS initialised");
   } else {
@@ -315,13 +259,16 @@ void setup() {
   SPI.begin();
   Serial.println("SPI initialised");
 
-  playerBegin();
-  Serial.println("Player initialisation started");
+  //playerBegin();
+  //Serial.println("Player initialisation started");
 
   wifiBegin();
   Serial.println("WiFi initialisation started");
 
-  playerWait();
+  wifiWait();
+  Serial.println("WiFi connected");
+
+  /*playerWait();
   wifiWait();
   Track test;
   strcpy(test.id, "123");
@@ -331,12 +278,12 @@ void setup() {
   strcpy(test.resource, "http://192.168.68.106:32469/object/f647173920a634673f22/file.flac");
   // strcpy(test.resource, "http://192.168.68.106:32469/object/3af33f13d6d2c1eb5cd5/file.flac");
   Player.addToPlaylist(&test);
-  return;
+  return;*/
 
-  wifiWait();
   Serial.println("Finding servers");
   DLNA.findServers(onServerFound);
   Serial.printf("Plex server name: %s\n\n", pPlex->name);
+  return;
 
   Albums.activate();
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <WiFiUdp.h>
+#include "esp_http_client.h"
 
 #include "../../XML/XmlParser/xml.h"
 #include "server.h"
@@ -20,9 +20,9 @@ class classDLNA {
   void findServers(ServerCallback serverCallback);
 
  private:
-  WiFiUDP udp;
   XmlParser descriptionBrowser;
 
+  static esp_err_t httpEventHandler(esp_http_client_event_t*);
   static void parserCallback(char *, char *, void *);
 
   void handleSearchLine(char *, DLNAServer *);

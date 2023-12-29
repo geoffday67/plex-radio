@@ -1,19 +1,31 @@
+#include <Arduino.h>
+
 #include "dlna.h"
 
-#include <HTTPClient.h>
-#include <WiFi.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <sys/socket.h>
 
 #include "../utils.h"
+#include "esp_log.h"
 
 classDLNA DLNA;
-
-extern WiFiClient wifiClient;
 
 static const char *TAG = "DLNA";
 
 void classDLNA::findServers(ServerCallback serverCallback) {
-  int length;
-  char *ppacket, *pline, *pend;
+  int client, length;
+  struct sockaddr_in dest_addr, src_addr;
+  char *pbuffer;
+  char *pline, *pend;
+
+  // TODO Receive multiple responses for 5(?) seconds, at the moment only the first response is used.
+
+  client = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+
+  inet_pton(AF_INET, "239.255.255.250", &dest_addr.sin_addr);
+  dest_addr.sin_family = AF_INET;
+  dest_addr.sin_port = htons(1900);
 
   char packet[] =
       "M-SEARCH * HTTP/1.1\n"
@@ -23,57 +35,54 @@ void classDLNA::findServers(ServerCallback serverCallback) {
       "ST: urn:schemas-upnp-org:service:ContentDirectory:1\n"
       "CPFN.UPNP.ORG: \"Plex radio\"\n"
       "\n";
-  udp.beginPacket("239.255.255.250", 1900);
-  udp.write((uint8_t *)packet, strlen(packet));
-  udp.endPacket();
 
-  // Receive packets for 3 seconds.
-  unsigned long start = millis();
-  while (millis() - start < 3000) {
-    yield;
+  length = sendto(client, packet, strlen(packet), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+  ESP_LOGD(TAG, "%d bytes sent", length);
 
-    length = udp.parsePacket();
-    if (length == 0) {
-      continue;
+  pbuffer = new char[2048];
+  socklen_t src_length = sizeof src_addr;
+  length = recvfrom(client, pbuffer, 2048, 0, (sockaddr *)&src_addr, &src_length);
+  pbuffer[length] = 0;
+  ESP_LOGD(TAG, "%d bytes received from %s", length, inet_ntoa(src_addr.sin_addr));
+
+  DLNAServer *pserver = new DLNAServer;
+
+  pline = pbuffer;
+  pend = strchr(pline, '\r');
+  while (pend) {
+    *pend = 0;
+    if (*pline) {
+      handleSearchLine(pline, pserver);
     }
-
-    ESP_LOGD(TAG, "UDP response received from %s", udp.remoteIP().toString().c_str());
-
-    ppacket = new char[length];
-    udp.readBytes(ppacket, length);
-    DLNAServer *pserver = new DLNAServer;
-
-    pline = ppacket;
+    pline = pend + 1;
+    if (*pline == '\n') {
+      pline++;
+    }
     pend = strchr(pline, '\r');
-    while (pend) {
-      *pend = 0;
-      if (*pline) {
-        handleSearchLine(pline, pserver);
-      }
-      pline = pend + 1;
-      if (*pline == '\n') {
-        pline++;
-      }
-      pend = strchr(pline, '\r');
-    }
-    delete[] ppacket;
-
-    // We should have location and id now, check if we've seen it before, if not add it to the result set.
-    /*if (presult->contains(pserver)) {
-      ESP_LOGD(TAG, "Duplicate ID found: %s", pserver->id);
-      delete pserver;
-      continue;
-    }*/
-
-    fetchDescription(pserver);
-    ESP_LOGD(TAG, "Got new server %s", pserver->name);
-    (*serverCallback)(pserver);
-    delete pserver;
   }
+  delete[] pbuffer;
+
+  // We should have location and id now, check if we've seen it before, if not add it to the result set.
+  /*if (presult->contains(pserver)) {
+    ESP_LOGD(TAG, "Duplicate ID found: %s", pserver->id);
+    delete pserver;
+    continue;
+  }*/
+
+  fetchDescription(pserver);
+  ESP_LOGD(TAG, "Got new server %s", pserver->name);
+  (*serverCallback)(pserver);
+  delete pserver;
+}
+
+esp_err_t classDLNA::httpEventHandler(esp_http_client_event_t *evt) {
+  return ESP_OK;
 }
 
 void classDLNA::handleSearchLine(char *pline, DLNAServer *pserver) {
   char *pid;
+
+  ESP_LOGI(TAG, "Processing line %s", pline);
 
   char *pname = pline;
   char *pseparator = strchr(pline, ':');
@@ -82,7 +91,7 @@ void classDLNA::handleSearchLine(char *pline, DLNAServer *pserver) {
   }
   *pseparator = 0;
   char *pvalue = pname + strlen(pname) + 1;
-  while (isWhitespace(*pvalue)) {
+  while (isspace(*pvalue)) {
     pvalue++;
   }
 
@@ -107,15 +116,19 @@ char *classDLNA::extractID(char *pvalue) {
 }
 
 void classDLNA::fetchDescription(DLNAServer *pserver) {
-  HTTPClient http_client;
-  int c, size, processed;
-  unsigned long start;
-  char *pdomain;
+  esp_http_client_handle_t client;
+  esp_http_client_config_t config;
+  int n, size, code;
+  char *pdomain, *presponse = 0;
 
   ESP_LOGD(TAG, "Fetching description from %s", pserver->descriptionURL);
 
-  http_client.setReuse(false);  // Prevents each call using memory to maintain state.
-  http_client.begin(wifiClient, pserver->descriptionURL);
+  memset(&config, 0, sizeof config);
+  config.url = pserver->descriptionURL;
+  config.user_agent = "Plex radio";
+  config.method = HTTP_METHOD_GET;
+  config.event_handler = httpEventHandler;
+  client = esp_http_client_init(&config);
 
   // Extract scheme and domain from description location as subsequent URLs are relative to this.
   pdomain = strnthchr(pserver->descriptionURL, '/', 3);
@@ -125,36 +138,31 @@ void classDLNA::fetchDescription(DLNAServer *pserver) {
   }
   ESP_LOGD(TAG, "Base domain is %s", pserver->baseDomain);
 
-  int code = http_client.GET();
+  // TODO Timeout
+  esp_http_client_open(client, 0);
+  size = esp_http_client_fetch_headers(client);
+  code = esp_http_client_get_status_code(client);
+  ESP_LOGD(TAG, "Status code %d, content length %d", code, size);
   if (code != 200) {
     ESP_LOGW(TAG, "Got status %d fetching description", code);
+    esp_http_client_close(client);
     goto exit;
   }
-  size = http_client.getSize();
+  presponse = new char[size + 1];
+  n = esp_http_client_read(client, presponse, size);
+  ESP_LOGD(TAG, "%d bytes read", n);
+  esp_http_client_close(client);
 
   descriptionBrowser.reset();
   descriptionBrowser.setXmlCallback(parserCallback);
   descriptionBrowser.setData(pserver);
 
-  processed = 0;
-  while (processed < size) {
-    start = millis();
-    while (wifiClient.available() == 0) {
-      if (millis() - start > 1000) {
-        ESP_LOGW(TAG, "Timeout waiting for description response");
-        goto exit;
-      }
-      delay(10);
-    }
-    c = wifiClient.read();
-    if (c != -1) {
-      descriptionBrowser.processChar(c);
-      processed++;
-    }
+  for (n = 0; n < size; n++) {
+    descriptionBrowser.processChar(presponse[n]);
   }
 
 exit:
-  http_client.end();
+  esp_http_client_cleanup(client);
 }
 
 void classDLNA::parserCallback(char *pname, char *pvalue, void *pdata) {
@@ -163,6 +171,7 @@ void classDLNA::parserCallback(char *pname, char *pvalue, void *pdata) {
   if (!strcasecmp(pname, "modelname") && pvalue) {
     DLNAServer *pserver = (DLNAServer *)pdata;
     strcpy(pserver->name, pvalue);
+    ESP_LOGI(TAG, "Server name found: %s", pvalue);
   } else if (!strcasecmp(pname, "service") && !pvalue) {
     // A service block is starting, get its type and control URL.
     pservice = new Service;
@@ -175,10 +184,12 @@ void classDLNA::parserCallback(char *pname, char *pvalue, void *pdata) {
   } else if (!strcasecmp(pname, "serviceType") && pvalue) {
     if (pservice) {
       strcpy(pservice->type, pvalue);
+      ESP_LOGI(TAG, "Service type found: %s", pvalue);
     }
   } else if (!strcasecmp(pname, "controlURL") && pvalue) {
     if (pservice) {
       strcpy(pservice->controlURL, pvalue);
+      ESP_LOGI(TAG, "Control URL found: %s", pvalue);
     }
   }
 }

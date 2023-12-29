@@ -83,7 +83,7 @@ bool classPlayer::begin() {
   }
 
   pVS1053->switchToMp3Mode();
-  pVS1053->loadUserCode(PATCH_FLAC, PATCH_FLAC_SIZE);
+  //pVS1053->loadUserCode(PATCH_FLAC, PATCH_FLAC_SIZE);
   pVS1053->setVolume(100);  // TESTING
 
   // Create a ring buffer and the task to read from it and send to the VS1053.

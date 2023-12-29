@@ -1,13 +1,12 @@
 #include <Arduino.h>
 #include <SPIFFS.h>
+#include <esp32_wifi/wifi.h>
 
 #include "driver/spi_master.h"
 #include "esp_http_client.h"
+#include "esp_log.h"
 #include "esp_wifi.h"
 #include "vs1053b.h"
-#include "esp_log.h"
-
-#include <esp32_wifi/wifi.h>
 
 #define VS1053_CS 21
 #define VS1053_DCS 22
@@ -87,10 +86,6 @@ void setup() {
     return;
   }
 
-  startHttp();
-
-  return;
-
   if (SPIFFS.begin(true)) {
     Serial.println("SPIFFS initialised");
   } else {
@@ -110,7 +105,7 @@ void setup() {
   vs1053b.begin();
   Serial.printf("Version %d\n", vs1053b.getVersion());
 
-  vs1053b.playFile();
+  vs1053b.playUrl("http://192.168.68.106:32469/object/48ec32d4e176fbd03eb7/file.mp3");
   Serial.println("Song complete");
 }
 
