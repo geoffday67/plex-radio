@@ -28,8 +28,7 @@ void strlcpy(char *pdest, const char *psrc, int max) {
       break;
   }
 
-  if (max != 0)
-    *pdest = '\0';
+  *pdest = '\0';
 }
 
 TaskHandle_t startTask(TaskFunction_t pcode, const char *const pname, void *const pparameters = 0) {
@@ -42,5 +41,5 @@ TaskHandle_t startTask(TaskFunction_t pcode, const char *const pname, void *cons
       ARDUINO_PRIORITY,
       &handle,
       ARDUINO_CORE);
-      return handle;
+  return handle;
 }

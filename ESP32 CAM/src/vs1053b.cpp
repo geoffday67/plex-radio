@@ -3,9 +3,10 @@
 #include <string.h>
 
 #include "driver/gpio.h"
+#include "esp32-hal-log.h"
 #include "esp_http_client.h"
-#include "esp_log.h"
 #include "freertos/task.h"
+#include "utils.h"
 
 char VS1053b::TAG[] = "VS1053b";
 
@@ -107,7 +108,7 @@ uint16_t VS1053b::readRegister(uint8_t target) {
   waitReady();
   spi_device_transmit(handleCommand, &transaction);
   result = (transaction.rx_data[0] * 256) + transaction.rx_data[1];
-  ESP_LOGD(TAG, "Reading 0x%04x from register 0x%02x\n", result, target);
+  ESP_LOGD(TAG, "Reading 0x%04x from register 0x%02x", result, target);
   return result;
 }
 
@@ -123,7 +124,7 @@ void VS1053b::writeRegister(uint8_t target, uint16_t value) {
   transaction.tx_data[1] = value % 256;
   waitReady();
   spi_device_transmit(handleCommand, &transaction);
-  ESP_LOGD(TAG, "Writing 0x%04x to register 0x%02x\n", value, target);
+  ESP_LOGD(TAG, "Writing 0x%04x to register 0x%02x", value, target);
 }
 
 uint16_t VS1053b::readWram(uint16_t target) {
@@ -157,7 +158,7 @@ void VS1053b::finaliseSong() {
   spi_transaction_t transaction;
 
   fill = getEndFillByte();
-  ESP_LOGD(TAG, "Using 0x%02X end fill byte\n", fill);
+  ESP_LOGD(TAG, "Using 0x%02X end fill byte", fill);
 
   memset(buffer, fill, 32);
   for (n = 0; n < 65; n++) {
@@ -214,25 +215,26 @@ void VS1053b::playFile() {
 }
 
 void VS1053b::playUrl(char *purl) {
-  esp_http_client_handle_t httpClient;
-  esp_http_client_config_t httpConfig;
+  esp_http_client_handle_t client;
+  esp_http_client_config_t config;
   int length, n, count;
   uint8_t buffer[32];
   spi_transaction_t transaction;
 
-  memset(&httpConfig, 0, sizeof httpConfig);
-  httpConfig.url = purl;
-  httpConfig.user_agent = "VS1053b";
-  httpConfig.method = HTTP_METHOD_GET;
-  httpClient = esp_http_client_init(&httpConfig);
+  memset(&config, 0, sizeof config);
+  config.url = purl;
+  config.user_agent = "Plex radio";
+  config.method = HTTP_METHOD_GET;
+  client = esp_http_client_init(&config);
 
-  esp_http_client_open(httpClient, 0);
-  length = esp_http_client_fetch_headers(httpClient);
-  ESP_LOGI(TAG, "Status code %d\n", esp_http_client_get_status_code(httpClient));
-  ESP_LOGI(TAG, "Content length %d\n", length);
+  esp_http_client_open(client, 0);
+  length = esp_http_client_fetch_headers(client);
+  ESP_LOGI(TAG, "Status code %d", esp_http_client_get_status_code(client));
+  ESP_LOGI(TAG, "Content length %d", length);
 
   while (1) {
-    count = esp_http_client_read(httpClient, (char *)buffer, 32);
+    count = esp_http_client_read(client, (char *)buffer, 32);
+    ESP_LOGD(TAG, "%d bytes read", count);
     if (count == 0) {
       break;
     }
@@ -244,8 +246,34 @@ void VS1053b::playUrl(char *purl) {
     waitReady();
     spi_device_transmit(handleData, &transaction);
   }
-  esp_http_client_close(httpClient);
-  esp_http_client_cleanup(httpClient);
+  esp_http_client_close(client);
+  esp_http_client_cleanup(client);
 
   finaliseSong();
+}
+
+void VS1053b::playChunk(uint8_t *pdata, int size) {
+  int count, offset, remaining;
+  spi_transaction_t transaction;
+
+  remaining = size;
+  offset = 0;
+
+  while (1) {
+    count = MIN(remaining, 32);
+
+    memset(&transaction, 0, sizeof transaction);
+    transaction.tx_buffer = pdata + offset;
+    transaction.length = count * 8;
+
+    waitReady();
+    spi_device_transmit(handleData, &transaction);
+
+    remaining -= count;
+    if (remaining == 0) {
+      break;
+    }
+    
+    offset += count;
+  }
 }

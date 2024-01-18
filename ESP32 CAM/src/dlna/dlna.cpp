@@ -1,5 +1,3 @@
-#include <Arduino.h>
-
 #include "dlna.h"
 
 #include <arpa/inet.h>
@@ -7,7 +5,7 @@
 #include <sys/socket.h>
 
 #include "../utils.h"
-#include "esp_log.h"
+#include "esp32-hal-log.h"
 
 classDLNA DLNA;
 
@@ -162,6 +160,7 @@ void classDLNA::fetchDescription(DLNAServer *pserver) {
   }
 
 exit:
+  delete[] presponse;
   esp_http_client_cleanup(client);
 }
 
@@ -179,17 +178,16 @@ void classDLNA::parserCallback(char *pname, char *pvalue, void *pdata) {
     if (begins(pservice->type, "urn:schemas-upnp-org:service:ContentDirectory")) {
       DLNAServer *pserver = (DLNAServer *)pdata;
       strcpy(pserver->controlPath, pservice->controlURL);
+      ESP_LOGI(TAG, "Content directory service found: %s", pservice->controlURL);
     }
     delete pservice;
   } else if (!strcasecmp(pname, "serviceType") && pvalue) {
     if (pservice) {
       strcpy(pservice->type, pvalue);
-      ESP_LOGI(TAG, "Service type found: %s", pvalue);
     }
   } else if (!strcasecmp(pname, "controlURL") && pvalue) {
     if (pservice) {
       strcpy(pservice->controlURL, pvalue);
-      ESP_LOGI(TAG, "Control URL found: %s", pvalue);
     }
   }
 }

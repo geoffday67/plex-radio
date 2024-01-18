@@ -1,12 +1,11 @@
 #pragma once
 
-#include <HTTPClient.h>
-#include <VS1053.h>
-
 #include <queue>
 
 #include "data/track.h"
+#include "esp_http_client.h"
 #include "vs1053b-patches-flac.h"
+#include "vs1053b.h"
 
 #define VS1053_CS 21
 #define VS1053_DCS 22
@@ -17,29 +16,29 @@ class RingBuffer {
  public:
   RingBuffer(int);
   ~RingBuffer();
-  byte *pData;
+  uint8_t *pData;
   int size, head, tail;
 
   int space();
   int available();
-  byte *pHead() { return pData + head; }
-  byte *pTail() { return pData + tail; }
+  uint8_t *pHead() { return pData + head; }
+  uint8_t *pTail() { return pData + tail; }
   void clear();
 };
 
 class Chunk {
  private:
   int count;
-  byte *pData;
+  uint8_t *pData;
 
   friend class classPlayer;
 };
 
 class classPlayer {
  private:
-  VS1053 *pVS1053;
+  VS1053b *pVS1053b;
   RingBuffer *pBuffer;
-  HTTPClient *pHttpClient;
+  esp_http_client_handle_t httpClient;
   std::queue<Track> playlist;
   TaskHandle_t playlisthandle;
   TaskHandle_t readHandle;

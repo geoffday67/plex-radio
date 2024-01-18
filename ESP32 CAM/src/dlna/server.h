@@ -9,6 +9,7 @@ class DLNAServer {
  private:
   XmlParser *pBrowseParser, *pResultParser;
   ObjectCallback objectCallback;
+  int found;
 
   static void browseCallback(char *, char *, void *);
   static void resultChar(char *, char, void *);
@@ -25,5 +26,5 @@ class DLNAServer {
   char id[128];
   char name[128];
 
-  void browse(char *pid, int offset, int results, ObjectCallback objectCallback);
+  void browse(char *pid, int offset, int results, char *pfilter, int *pfound, ObjectCallback objectCallback);
 };

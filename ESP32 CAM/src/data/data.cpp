@@ -14,8 +14,6 @@ bool classData::initDatabase() {
   bool result = false;
   int rc;
 
-  // SPIFFS.remove("/plex.db");
-
   rc = sqlite3_initialize();
   if (rc != SQLITE_OK) {
     Serial.printf("Can't initialise database, error code: %d\n", rc);
@@ -25,22 +23,6 @@ bool classData::initDatabase() {
   rc = sqlite3_open("/spiffs/plex.db", &database);
   if (rc != SQLITE_OK) {
     Serial.printf("Can't open database: %s\n", sqlite3_errmsg(database));
-    goto exit;
-  }
-
-  // TODO Add collation to columns during creation rather than during fetching.
-  // Might also fix the problem of not using custom collation.
-  rc = sqlite3_exec(database, "CREATE TABLE IF NOT EXISTS albums (id TEXT, title TEXT, artist TEXT)", NULL, NULL, NULL);
-  // rc = sqlite3_exec(database, "CREATE TABLE IF NOT EXISTS albums (id TEXT PRIMARY KEY, title TEXT, artist TEXT)", NULL, NULL, NULL);
-  if (rc != SQLITE_OK) {
-    Serial.printf("Can't create albums table: %s\n", sqlite3_errmsg(database));
-    goto exit;
-  }
-
-  rc = sqlite3_exec(database, "CREATE TABLE IF NOT EXISTS tracks (id TEXT, album TEXT, title TEXT, resource TEXT)", NULL, NULL, NULL);
-  // rc = sqlite3_exec(database, "CREATE TABLE IF NOT EXISTS tracks (id TEXT PRIMARY KEY, album TEXT, title TEXT, resource TEXT)", NULL, NULL, NULL);
-  if (rc != SQLITE_OK) {
-    Serial.printf("Can't create tracks table: %s\n", sqlite3_errmsg(database));
     goto exit;
   }
 
@@ -64,15 +46,25 @@ int classData::collateNatural(void *pdata, int length1, const void *pstring1, in
 void classData::clearAll() {
   int rc;
 
-  rc = sqlite3_exec(database, "DELETE FROM albums", NULL, NULL, NULL);
+  sqlite3_close(database);
+
+  SPIFFS.remove("/plex.db");
+
+  rc = sqlite3_open("/spiffs/plex.db", &database);
   if (rc != SQLITE_OK) {
-    Serial.printf("Can't clear tracks table: %s\n", sqlite3_errmsg(database));
+    Serial.printf("Can't open database: %s\n", sqlite3_errmsg(database));
     goto exit;
   }
 
-  rc = sqlite3_exec(database, "DELETE FROM tracks", NULL, NULL, NULL);
+  rc = sqlite3_exec(database, "CREATE TABLE albums (id TEXT, title TEXT, artist TEXT)", NULL, NULL, NULL);
   if (rc != SQLITE_OK) {
-    Serial.printf("Can't clear tracks table: %s\n", sqlite3_errmsg(database));
+    Serial.printf("Can't create albums table: %s\n", sqlite3_errmsg(database));
+    goto exit;
+  }
+
+  rc = sqlite3_exec(database, "CREATE TABLE tracks (id TEXT, album TEXT, title TEXT, resource TEXT)", NULL, NULL, NULL);
+  if (rc != SQLITE_OK) {
+    Serial.printf("Can't create tracks table: %s\n", sqlite3_errmsg(database));
     goto exit;
   }
 
@@ -80,43 +72,117 @@ exit:
   return;
 }
 
-void classData::storeTrack(Track *ptrack) {
+bool classData::beginStoreTracks() {
+  bool result = false;
+  char *perror;
   int rc;
-  sqlite3_stmt *stmt;
 
-  rc = sqlite3_prepare_v2(database, "INSERT INTO tracks (id, album, title, resource) VALUES (?, ?, ?, ?)", -1, &stmt, NULL);
+  rc = sqlite3_prepare_v2(database, "INSERT INTO tracks (id, album, title, resource) VALUES (?, ?, ?, ?)", -1, &trackStatement, NULL);
   if (rc != SQLITE_OK) {
-    Serial.printf("Error during album preparation: %s\n", sqlite3_errmsg(database));
+    Serial.printf("Error during track preparation: %s\n", sqlite3_errmsg(database));
     goto exit;
   }
 
-  rc = sqlite3_bind_text(stmt, 1, ptrack->id, -1, SQLITE_STATIC);
+  rc = sqlite3_exec(database, "BEGIN TRANSACTION", NULL, NULL, &perror);
+  if (perror) {
+    Serial.printf("Error during start track transaction: %s\n", perror);
+    sqlite3_free(perror);
+    goto exit;
+  }
+
+  result = true;
+
+exit:
+  return result;
+}
+
+bool classData::storeTrack(Track *ptrack) {
+  bool result = false;
+  int rc;
+
+  rc = sqlite3_bind_text(trackStatement, 1, ptrack->id, -1, SQLITE_STATIC);
   if (rc != SQLITE_OK) {
     Serial.printf("Error during track id binding: %s\n", sqlite3_errmsg(database));
     goto exit;
   }
 
-  rc = sqlite3_bind_text(stmt, 2, ptrack->album, -1, SQLITE_STATIC);
+  rc = sqlite3_bind_text(trackStatement, 2, ptrack->album, -1, SQLITE_STATIC);
   if (rc != SQLITE_OK) {
     Serial.printf("Error during track album binding: %s\n", sqlite3_errmsg(database));
     goto exit;
   }
 
-  rc = sqlite3_bind_text(stmt, 3, ptrack->title, -1, SQLITE_STATIC);
+  rc = sqlite3_bind_text(trackStatement, 3, ptrack->title, -1, SQLITE_STATIC);
   if (rc != SQLITE_OK) {
     Serial.printf("Error during track title binding: %s\n", sqlite3_errmsg(database));
     goto exit;
   }
 
-  rc = sqlite3_bind_text(stmt, 4, ptrack->resource, -1, SQLITE_STATIC);
+  rc = sqlite3_bind_text(trackStatement, 4, ptrack->resource, -1, SQLITE_STATIC);
   if (rc != SQLITE_OK) {
     Serial.printf("Error during track resource binding: %s\n", sqlite3_errmsg(database));
     goto exit;
   }
 
-  rc = sqlite3_step(stmt);
+  rc = sqlite3_step(trackStatement);
   if (rc != SQLITE_DONE) {
     Serial.printf("Error during track step: %s\n", sqlite3_errmsg(database));
+    goto exit;
+  }
+
+  result = true;
+
+exit:
+  sqlite3_reset(trackStatement);
+
+  return result;
+}
+
+bool classData::endStoreTracks() {
+  bool result = false;
+  char *perror;
+  int rc;
+
+  sqlite3_finalize(trackStatement);
+
+  rc = sqlite3_exec(database, "END TRANSACTION", NULL, NULL, &perror);
+  if (perror) {
+    Serial.printf("Error during end track transaction: %s\n", perror);
+    sqlite3_free(perror);
+    goto exit;
+  }
+
+  result = true;
+
+exit:
+  return result;
+}
+
+void classData::startTransaction() {
+  int rc;
+  char *perror;
+  sqlite3_stmt *stmt;
+
+  rc = sqlite3_exec(database, "BEGIN TRANSACTION", NULL, NULL, &perror);
+  if (perror) {
+    Serial.printf("Error during start transaction: %s\n", perror);
+    sqlite3_free(perror);
+    goto exit;
+  }
+
+exit:
+  sqlite3_finalize(stmt);
+}
+
+void classData::endTransaction() {
+  int rc;
+  char *perror;
+  sqlite3_stmt *stmt;
+
+  rc = sqlite3_exec(database, "END TRANSACTION", NULL, NULL, &perror);
+  if (perror) {
+    Serial.printf("Error during end transaction: %s\n", perror);
+    sqlite3_free(perror);
     goto exit;
   }
 
@@ -275,37 +341,46 @@ void classData::storeAlbums(Album *palbums, int count) {
   }
 }
 
-void classData::dumpDatabase() {
-  int rc, count, n;
+int classData::getAlbumCount() {
+  int count;
   sqlite3_stmt *stmt;
 
-  rc = sqlite3_prepare_v2(database, "SELECT id, title, artist FROM albums", -1, &stmt, NULL);
-  if (rc != SQLITE_OK) {
-    Serial.printf("Error during preparation: ", sqlite3_errmsg(database));
-    goto exit;
-  }
+  count = 0;
+  sqlite3_prepare_v2(database, "SELECT COUNT(*) FROM albums", -1, &stmt, NULL);
+  sqlite3_step(stmt);
+  count = sqlite3_column_int(stmt, 0);
+  sqlite3_finalize(stmt);
+
+  return count;
+}
+
+void classData::dumpDatabase() {
+  int rc;
+  sqlite3_stmt *stmt, *track_stmt;
+  char *id, *title, *artist, *track_title;
+
+  sqlite3_prepare_v2(database, "SELECT id, title, artist FROM albums", -1, &stmt, NULL);
+  sqlite3_prepare_v2(database, "SELECT title FROM tracks WHERE album=?", -1, &track_stmt, NULL);
+
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-    char *id = (char *)sqlite3_column_text(stmt, 0);
-    char *title = (char *)sqlite3_column_text(stmt, 1);
-    char *artist = (char *)sqlite3_column_text(stmt, 2);
+    id = (char *)sqlite3_column_text(stmt, 0);
+    title = (char *)sqlite3_column_text(stmt, 1);
+    artist = (char *)sqlite3_column_text(stmt, 2);
     Serial.printf("%s by %s\n", title, artist);
 
-    Track *ptracks;
-    count = getTracks(id, &ptracks);
-    if (count > 0) {
-      for (n = 0; n < count; n++) {
-        Serial.printf("  %s\n", (ptracks + n)->title);
-      }
-      delete[] ptracks;
-      Serial.println();
+    sqlite3_bind_text(track_stmt, 1, id, -1, SQLITE_STATIC);
+    while (sqlite3_step(track_stmt) == SQLITE_ROW) {
+      track_title = (char *)sqlite3_column_text(track_stmt, 0);
+      Serial.printf("  %s\n", track_title);
     }
+    Serial.println();
   }
-  if (rc != SQLITE_DONE) {
-    Serial.printf("Error during steps: ", sqlite3_errmsg(database));
-  }
+
+  Serial.println("Database dumped");
 
 exit:
   sqlite3_finalize(stmt);
+  sqlite3_finalize(track_stmt);
 }
 
 void classData::dumpTracks() {

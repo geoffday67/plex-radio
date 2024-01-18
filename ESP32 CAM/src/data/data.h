@@ -10,20 +10,27 @@ class classData {
   sqlite3 *database;
   bool initDatabase();
   static int collateNatural (void *, int, const void *, int, const void *);
+  sqlite3_stmt *trackStatement;
 
  public:
   bool begin();
   void clearAll();
 
-  void storeTrack(Track *ptrack);
+  bool beginStoreTracks();
+  bool storeTrack(Track *ptrack);
+  bool endStoreTracks();
   int getTracks(char *, Track **ppresult);
 
   void storeAlbum(Album *);
   void storeAlbums(Album *palbums, int count);
   int getAlbums(Album **ppresult);
+  int getAlbumCount();
 
   void dumpDatabase();
   void dumpTracks();
+
+  void startTransaction();
+  void endTransaction();
 };
 
 extern classData Data;

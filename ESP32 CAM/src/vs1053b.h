@@ -45,4 +45,5 @@ class VS1053b {
   int getVersion();
   void playFile();
   void playUrl(char *purl);
+  void playChunk(uint8_t *pdata, int size);
 };

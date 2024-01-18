@@ -105,7 +105,9 @@ void setup() {
   vs1053b.begin();
   Serial.printf("Version %d\n", vs1053b.getVersion());
 
-  vs1053b.playUrl("http://192.168.68.106:32469/object/48ec32d4e176fbd03eb7/file.mp3");
+  //vs1053b.setVolume(80);
+
+  vs1053b.playUrl("http://192.168.68.106:32469/object/2025ba9289137064ca17/file.mp3");
   Serial.println("Song complete");
 }
 

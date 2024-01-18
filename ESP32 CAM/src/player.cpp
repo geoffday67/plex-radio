@@ -1,14 +1,11 @@
 #include "player.h"
 
-#include <SPIFFS.h>
-#include <WiFi.h>
 #include <esp_task_wdt.h>
 
 #include "constants.h"
+#include "esp32-hal-log.h"
 #include "utils.h"
 
-extern WiFiClient wifiClient;
-extern void playerWait(void);
 extern void wifiWait(void);
 
 static const char *TAG = "Player";
@@ -17,11 +14,11 @@ classPlayer Player;
 
 RingBuffer::RingBuffer(int size) {
   this->size = size;
-  pData = new byte[size];
+  pData = new uint8_t[size];
   if (pData) {
-    Serial.printf("%d bytes allocated\n", size);
+    ESP_LOGI(TAG, "%d bytes allocated", size);
   } else {
-    Serial.printf("Error allocating %d bytes\n", size);
+    ESP_LOGE(TAG, "Error allocating %d bytes", size);
   }
   head = 0;
   tail = 0;
@@ -53,47 +50,39 @@ void RingBuffer::clear() {
 }
 
 classPlayer::classPlayer() {
-  pVS1053 = 0;
+  pVS1053b = 0;
   pBuffer = 0;
-  pHttpClient = 0;
   readHandle = 0;
 }
 
 classPlayer::~classPlayer() {
-  delete pVS1053;
+  delete pVS1053b;
   delete pBuffer;
-  delete pHttpClient;
 }
+
+/*
+Interrupt-driven sending.
+Interrupt happens when DREQ is high but don't want continuous interrupts.
+  Enable this interrupt only when playing a song?
+During ISR:
+  Check there's at least 32 bytes of data to send.
+  We know that DREQ's high so send immediately.
+  Only send 32 bytes then return so as to keep the ISR quick.
+*/
 
 bool classPlayer::begin() {
   bool result = false;
 
-  pinMode(VS1053_RESET, OUTPUT);
-  digitalWrite(VS1053_RESET, LOW);
-  delay(10);
-  digitalWrite(VS1053_RESET, HIGH);
-  delay(10);
-  pVS1053 = new VS1053(VS1053_CS, VS1053_DCS, VS1053_DREQ);
-  pVS1053->begin();
+  pVS1053b = new VS1053b(VS1053_CS, VS1053_DCS, VS1053_DREQ, VS1053_RESET);
+  pVS1053b->begin();
 
-  if (pVS1053->isChipConnected()) {
-    Serial.println("Chip connected");
-  } else {
-    Serial.println("Chip NOT connected");
-  }
-
-  pVS1053->switchToMp3Mode();
-  //pVS1053->loadUserCode(PATCH_FLAC, PATCH_FLAC_SIZE);
-  pVS1053->setVolume(100);  // TESTING
-
-  // Create a ring buffer and the task to read from it and send to the VS1053.
   pBuffer = new RingBuffer(3000000);
   dataHandle = startTask(dataTask, "data", this);
-  Serial.println("Player: Data task created");
+  ESP_LOGI(TAG, "Data task created");
 
   playlistLock = portMUX_INITIALIZER_UNLOCKED;
   playlisthandle = startTask(playlistTask, "playlist", this);
-  Serial.println("Player: Playlist task created");
+  ESP_LOGI(TAG, "Playlist task created");
 
   // startTask(debugTask, "debug", this);
 
@@ -104,7 +93,7 @@ exit:
 }
 
 void classPlayer::setVolume(int volume) {
-  pVS1053->setVolume(volume);
+  // pVS1053->setVolume(volume);
 }
 
 /*
@@ -116,22 +105,21 @@ Library SPI maybe has too much overhead - write our own for this part?
 
 // Send data from the ring buffer to the VS1053.
 void classPlayer::dataTask(void *pdata) {
-  classPlayer *pPlayer = (classPlayer *)pdata;
-  RingBuffer *pring = pPlayer->pBuffer;
+  classPlayer *pthis = (classPlayer *)pdata;
+  RingBuffer *pring = pthis->pBuffer;
   int count, chunk;
 
   while (true) {
     count = MIN(pring->available(), 10000);
     if (count > 0) {
-      // Serial.printf("Sending %d bytes\n", count);
       if (pring->head > pring->tail) {
-        pPlayer->pVS1053->playChunk(pring->pTail(), count);
+        pthis->pVS1053b->playChunk(pring->pTail(), count);
       } else {
         chunk = MIN(pring->size - pring->tail, count);
-        pPlayer->pVS1053->playChunk(pring->pTail(), chunk);
+        pthis->pVS1053b->playChunk(pring->pTail(), chunk);
         chunk = count - chunk;
         if (chunk > 0) {
-          pPlayer->pVS1053->playChunk(pring->pData, chunk);
+          pthis->pVS1053b->playChunk(pring->pData, chunk);
         }
       }
 
@@ -140,8 +128,8 @@ void classPlayer::dataTask(void *pdata) {
         pring->tail -= pring->size;
       }
 
-      if (!pPlayer->isPlaying) {
-        pPlayer->pBuffer->clear();
+      if (!pthis->isPlaying) {
+        pthis->pBuffer->clear();
         continue;
       }
     }
@@ -159,9 +147,9 @@ void classPlayer::readTask(void *pdata) {
   bool task_started = false;
   TaskHandle_t dataHandle;
 
-  size = pPlayer->pHttpClient->getSize();
+  size = esp_http_client_get_content_length(pPlayer->httpClient);
 
-  Serial.printf("%ld bytes total\n", size);
+  ESP_LOGI(TAG, "%d bytes total", size);
   processed = 0;
   pPlayer->isPlaying = true;
 
@@ -176,14 +164,14 @@ void classPlayer::readTask(void *pdata) {
       continue;
     }
 
-    start = millis();
+    /*start = millis();
     while ((available = wifiClient.available()) == 0) {
       if (millis() - start > 5000) {
         Serial.println("Timeout waiting for resource response");
         goto exit;
       }
       vTaskDelay(10);
-    }
+    }*/
 
     // "count" is the total number of bytes we're going to add to the buffer.
     count = MIN(available, space);
@@ -191,14 +179,15 @@ void classPlayer::readTask(void *pdata) {
     if (pPlayer->pBuffer->head >= pPlayer->pBuffer->tail) {
       // Write from the head to buffer end, then from buffer start to the tail if there's more to write.
       chunk = MIN(pPlayer->pBuffer->size - pPlayer->pBuffer->head, count);
-      wifiClient.readBytes(pPlayer->pBuffer->pHead(), chunk);
+      count = esp_http_client_read(pPlayer->httpClient, (char *)pPlayer->pBuffer->pHead(), chunk);
+
       chunk = count - chunk;
       if (chunk > 0) {
-        wifiClient.readBytes(pPlayer->pBuffer->pData, chunk);
+        esp_http_client_read(pPlayer->httpClient, (char *)pPlayer->pBuffer->pData, chunk);
       }
     } else {
       // Write everything at head.
-      wifiClient.readBytes(pPlayer->pBuffer->pHead(), count);
+      esp_http_client_read(pPlayer->httpClient, (char *)pPlayer->pBuffer->pHead(), count);
     }
 
     // Bump the buffer head but only set it once as that's what triggers the sending process.
@@ -233,8 +222,8 @@ void classPlayer::readTask(void *pdata) {
   }
 
 exit:
-  pPlayer->pHttpClient->end();
-  Serial.println("Finished playing");
+  // pPlayer->pHttpClient->end();
+  ESP_LOGI(TAG, "Finished playing");
   pPlayer->isPlaying = false;
 
   // TODO Wait for buffer to be empty then delete the task.
@@ -245,17 +234,17 @@ void classPlayer::debugTask(void *pdata) {
   while (1) {
     classPlayer *pplayer = (classPlayer *)pdata;
     RingBuffer *pbuffer = pplayer->pBuffer;
-    Serial.println(pbuffer->available());
+    // Serial.println(pbuffer->available());
     vTaskDelay(100);
   }
 }
 
 // Start playing a track by requesting data from the server and creating a task to keep reading it into the ring buffer.
 void classPlayer::startPlay() {
+  esp_http_client_config_t config;
+
   wifiWait();
-  Serial.println("WiFi ready");
-  playerWait();
-  Serial.println("Player ready");
+  ESP_LOGI(TAG, "WiFi ready");
 
   // Stop any existing play before starting the new one.
   if (isPlaying) {
@@ -266,12 +255,19 @@ void classPlayer::startPlay() {
     pBuffer->clear();
   }
 
-  Serial.printf("Requesting track %s from %s\n", currentTrack.title, currentTrack.resource);
-  pHttpClient = new HTTPClient;
-  pHttpClient->setReuse(false);
-  pHttpClient->begin(wifiClient, currentTrack.resource);
-  int code = pHttpClient->GET();
-  Serial.printf("Got code %d loading resource\n", code);
+  ESP_LOGI(TAG, "Requesting track %s from %s", currentTrack.title, currentTrack.resource);
+
+  memset(&config, 0, sizeof config);
+  config.url = currentTrack.resource;
+  config.user_agent = "Plex radio";
+  config.method = HTTP_METHOD_GET;
+  httpClient = esp_http_client_init(&config);
+
+  esp_http_client_open(httpClient, 0);
+  esp_http_client_fetch_headers(httpClient);
+
+  int code = esp_http_client_get_status_code(httpClient);
+  ESP_LOGI(TAG, "Got code %d loading resource", code);
   if (code != 200) {
     goto exit;
   }

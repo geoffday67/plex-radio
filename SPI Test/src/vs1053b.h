@@ -4,8 +4,6 @@
 
 class VS1053b {
  private:
-  static char TAG[];
-
   static const uint8_t COMMAND_WRITE = 0x02;
   static const uint8_t COMMAND_READ = 0x03;
 
@@ -14,6 +12,7 @@ class VS1053b {
   static const uint8_t REGISTER_CLOCKF = 0x03;
   static const uint8_t REGISTER_WRAM = 0x06;
   static const uint8_t REGISTER_WRAM_ADDR = 0x07;
+  static const uint8_t REGISTER_VOL = 0x0B;
 
   static const uint16_t SM_RESET = 0x0004;
   static const uint16_t SM_CANCEL = 0x0008;
@@ -38,11 +37,16 @@ class VS1053b {
   void switchToMP3();
   uint8_t getEndFillByte();
   void finaliseSong();
+  char *pURL;
+
+  static void playTask(void*);
+  static void fetchTask(void*);
 
  public:
   VS1053b(int cs, int dcs, int dreq, int reset);
   void begin();
   int getVersion();
+  void setVolume(int);
   void playFile();
   void playUrl(char *purl);
 };

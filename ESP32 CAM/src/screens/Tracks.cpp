@@ -62,7 +62,6 @@ void classTracks::handleEncoderEvent(EncoderEvent *pevent) {
 void classTracks::handleSwitchEvent(SwitchEvent *pevent) {
   if (pevent->pressed) {
     Track *ptrack = ptracks + current;
-    // Player.play(ptrack->resource);
     Serial.printf("Encoder pressed on track %s\n", ptrack->title);
     Player.resetPlaylist(ptrack);
   }

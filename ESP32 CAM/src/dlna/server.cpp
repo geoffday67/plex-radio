@@ -1,10 +1,7 @@
 #include "server.h"
 
-#include <Arduino.h>
-#include <HTTPClient.h>
-#include <WiFi.h>
-
-extern WiFiClient wifiClient;
+#include "esp32-hal-log.h"
+#include "esp_http_client.h"
 
 static const char *TAG = "SERVER";
 
@@ -33,40 +30,63 @@ DLNAServer::~DLNAServer() {
   delete pResultParser;
 }
 
-void DLNAServer::browse(char *pid, int offset, int results, ObjectCallback objectCallback) {
-  String action("");
-  char buffer[256];
-  HTTPClient http_client;
-  int c, count, n, size, processed;
-  unsigned long start;
+void DLNAServer::browse(char *pid, int offset, int results, char *pfilter, int *pfound, ObjectCallback objectCallback) {
+  char buffer[256], *paction;
+  esp_http_client_handle_t client;
+  esp_http_client_config_t config;
+  int n, size, code, length;
+  char *presponse = 0;
 
-  action += "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">";
-  action += "<s:Body>";
-  action += "<u:Browse xmlns:u=\"urn:schemas-upnp-org:service:ContentDirectory:1\">";
+  paction = new char[1024];
+
+  strcpy(paction, "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">");
+  strcat(paction, "<s:Body>");
+  strcat(paction, "<u:Browse xmlns:u=\"urn:schemas-upnp-org:service:ContentDirectory:1\">");
   sprintf(buffer, "<ObjectID>%s</ObjectID>", pid);
-  action += buffer;
-  action += "<BrowseFlag>BrowseDirectChildren</BrowseFlag>";
-  action += "<Filter>*</Filter>";
-  action += "<StartingIndex>0</StartingIndex>";
+  strcat(paction, buffer);
+
+  strcat(paction, "<BrowseFlag>BrowseDirectChildren</BrowseFlag>");
+
+  sprintf(buffer, "<Filter>%s</Filter>", pfilter);
+  strcat(paction, buffer);
+
+  sprintf(buffer, "<StartingIndex>%d</StartingIndex>", offset);
+  strcat(paction, buffer);
+
   sprintf(buffer, "<RequestedCount>%d</RequestedCount>", results);
-  action += buffer;
-  action += "<SortCriteria></SortCriteria>";
-  action += "</u:Browse>";
-  action += "</s:Body>";
-  action += "</s:Envelope>";
+  strcat(paction, buffer);
+  strcat(paction, "<SortCriteria></SortCriteria>");
+  strcat(paction, "</u:Browse>");
+  strcat(paction, "</s:Body>");
+  strcat(paction, "</s:Envelope>");
 
   sprintf(buffer, "%s%s", baseDomain, controlPath);
   ESP_LOGD(TAG, "Browsing object %s at %s", pid, buffer);
-  http_client.setReuse(false);
-  http_client.begin(wifiClient, buffer);
-  http_client.addHeader("SOAPACTION", "\"urn:schemas-upnp-org:service:ContentDirectory:1#Browse\"");
-  int code = http_client.POST(action);
+
+  memset(&config, 0, sizeof config);
+  config.url = buffer;
+  config.user_agent = "Plex radio";
+  config.method = HTTP_METHOD_POST;
+  client = esp_http_client_init(&config);
+  esp_http_client_set_header(client, "SOAPACTION", "\"urn:schemas-upnp-org:service:ContentDirectory:1#Browse\"");
+
+  // TODO Timeout
+  // TODO Connection re-use
+
+  length = strlen(paction);
+  esp_http_client_open(client, length);
+  esp_http_client_write(client, paction, length);
+  size = esp_http_client_fetch_headers(client);
+  code = esp_http_client_get_status_code(client);
+  ESP_LOGD(TAG, "Status code %d, content length %d", code, size);
   if (code != 200) {
-    ESP_LOGW(TAG, "Got status %d browsing", code);
+    esp_http_client_close(client);
     goto exit;
   }
-
-  size = http_client.getSize();
+  presponse = new char[size + 1];
+  n = esp_http_client_read(client, presponse, size);
+  ESP_LOGD(TAG, "%d response bytes read", n);
+  esp_http_client_close(client);
 
   if (!pBrowseParser) {
     pBrowseParser = new XmlParser();
@@ -84,28 +104,18 @@ void DLNAServer::browse(char *pid, int offset, int results, ObjectCallback objec
 
   this->objectCallback = objectCallback;
 
-  processed = 0;
-  while (processed < size) {
-    start = millis();
-    while ((count = wifiClient.available()) == 0) {
-      if (millis() - start > 1000) {
-        ESP_LOGW(TAG, "Timeout waiting for browsing response");
-        goto exit;
-      }
-      delay(10);
-    }
-    if (count > 256) {
-      count = 256;
-    }
-    wifiClient.readBytes(buffer, count);
-    for (n = 0; n < count; n++) {
-      pBrowseParser->processChar(buffer[n]);
-      processed++;
-    }
+  for (n = 0; n < size; n++) {
+    pBrowseParser->processChar(presponse[n]);
+  }
+
+  if (pfound) {
+    *pfound = found;
   }
 
 exit:
-  http_client.end();
+  delete[] paction;
+  delete[] presponse;
+  esp_http_client_cleanup(client);
 }
 
 void DLNAServer::resultCallback(char *pname, char *pvalue, void *pdata) {
@@ -142,6 +152,10 @@ void DLNAServer::browseCallback(char *pname, char *pvalue, void *pdata) {
       pserver->pBrowseParser->setCharCallback(resultChar);
     } else {
       pserver->pBrowseParser->setCharCallback(0);
+    }
+  } else if (!strcmp(pname, "NumberReturned")) {
+    if (pvalue) {
+      pserver->found = atoi(pvalue);
     }
   }
 }

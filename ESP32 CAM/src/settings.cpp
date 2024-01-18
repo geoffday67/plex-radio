@@ -3,5 +3,5 @@
 classSettings Settings;
 
 SortOrder classSettings::getSortOrder() {
-  return SortOrder::Artist;
+  return SortOrder::Title;
 }
