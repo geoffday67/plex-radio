@@ -2,17 +2,22 @@
 #include <Debouncer.h>
 #include <SPIFFS.h>
 #include <driver/adc.h>
+#include <driver/spi_master.h>
 #include <esp32_wifi/wifi.h>
+#include <freertos/event_groups.h>
 
 #include <regex>
 
+#include "buttons/play.h"
 #include "constants.h"
 #include "data/data.h"
 #include "dlna/dlna.h"
 #include "esp_log.h"
+#include "pins.h"
 #include "player.h"
 #include "rotary.h"
 #include "screens/Albums.h"
+#include "screens/Menu.h"
 #include "screens/Output.h"
 #include "utils.h"
 
@@ -26,26 +31,14 @@
 
 #define BACK_BUTTON 33
 
-#define PLAY_BUTTON 35
-#define PLAY_LIGHT 32
-
 #define STOP_BUTTON 26
 #define STOP_LIGHT 27
 
 static const char *TAG = "MAIN";
 
-const EventBits_t WIFI_CONNECTED_BIT = 0x01;
 EventGroupHandle_t plexRadioGroup;
 ESP32Wifi network;
 Rotary encoder(ENCODER_CLK, ENCODER_DT, ENCODER_BUTTON);
-
-void showPlay(bool show) {
-  if (show) {
-    digitalWrite(PLAY_LIGHT, HIGH);
-  } else {
-    digitalWrite(PLAY_LIGHT, LOW);
-  }
-}
 
 void showStop(bool show) {
   if (show) {
@@ -80,7 +73,7 @@ int getPlayValue() {
 }
 
 void playChanged(int value) {
-  Serial.printf("Play button %d\n", value);
+  EventManager.queueEvent(new PlayEvent(value));
 }
 
 Debouncer *pPlayDebouncer;
@@ -90,18 +83,33 @@ int getStopValue() {
 }
 
 void stopChanged(int value) {
-  Serial.printf("Stop button %d\n", value);
+  if (value) {
+    xEventGroupSetBits(plexRadioGroup, STOP_BIT);
+  }
 }
 
 Debouncer *pStopDebouncer;
 
+void wifiTask(void *pparams) {
+  EventBits_t bits;
+
+  bits = xEventGroupWaitBits(plexRadioGroup, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, pdMS_TO_TICKS(10000));
+  if ((bits & WIFI_CONNECTED_BIT) == 0) {
+    PlayButton::setState(PlayButton::State::Off);
+  } else {
+    PlayButton::setState(PlayButton::State::On);
+  }
+  vTaskDelete(NULL);
+}
+
 void wifiBegin() {
+  startTask(wifiTask, "wifi");
   network.start(plexRadioGroup, WIFI_CONNECTED_BIT);
 }
 
 bool wifiWait() {
   EventBits_t bits;
-  bits = xEventGroupWaitBits(plexRadioGroup, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, pdMS_TO_TICKS(5000));
+  bits = xEventGroupWaitBits(plexRadioGroup, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, pdMS_TO_TICKS(10000));
   if ((bits & WIFI_CONNECTED_BIT) == 0) {
     return false;
   }
@@ -223,6 +231,9 @@ void setup() {
   esp_event_loop_create_default();
   Serial.println("Event group created");
 
+  wifiBegin();
+  Serial.println("WiFi initialisation started");
+
   if (SPIFFS.begin(true)) {
     Serial.println("SPIFFS initialised");
   } else {
@@ -244,9 +255,8 @@ void setup() {
   Serial.println("Back button initialised");
 
   pinMode(PLAY_BUTTON, INPUT);
-  pinMode(PLAY_LIGHT, OUTPUT);
-  showPlay(true);
   pPlayDebouncer = new Debouncer(getPlayValue, playChanged, 100);
+  PlayButton::begin(PlayButton::State::Flashing); // Flash while we connect WiFi.
   Serial.println("Play button initialised");
 
   pinMode(STOP_BUTTON, INPUT);
@@ -262,30 +272,28 @@ void setup() {
   spi_bus_initialize(SPI3_HOST, &spi_config, SPI_DMA_DISABLED);
   Serial.println("SPI initialised");
 
-  Player.begin();
+  Player::begin();
+  // Player::setVolume(80);
   Serial.println("Player initialised");
 
-  wifiBegin();
-  Serial.println("WiFi initialisation started");
-
-  /*wifiWait();
-  Track test;
+  /*Track test;
   strcpy(test.id, "123");
   strcpy(test.album, "Test album");
   strcpy(test.title, "Test track");
   // strcpy(test.resource, "http://192.168.68.106:32469/object/8759b6af55861818f5c0/file.flac");
-  strcpy(test.resource, "http://192.168.68.106:32469/object/f647173920a634673f22/file.flac");
+  // strcpy(test.resource, "http://192.168.68.106:32469/object/f647173920a634673f22/file.flac");
   // strcpy(test.resource, "http://192.168.68.106:32469/object/3af33f13d6d2c1eb5cd5/file.flac");
-  Player.addToPlaylist(&test);
-  return;*/
+  // strcpy(test.resource, "http://192.168.68.106:32469/object/2025ba9289137064ca17/file.mp3");
+  Player::addToPlaylist(&test);*/
 
-  /*Serial.println("Finding servers");
+  /*wifiWait();
+  Serial.println("Finding servers");
   DLNA.findServers(onServerFound);
   Serial.printf("Plex server name: %s\n", pPlex->name);
-  refreshData();
-  return;*/
+  refreshData();*/
 
-  Albums.activate();
+  Menu.activate();
+  // Albums.activate();
 }
 
 void loop() {

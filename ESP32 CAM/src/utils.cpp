@@ -2,7 +2,8 @@
 #include <string.h>
 #include <strings.h>
 
-#include "constants.h"Ï
+#include "constants.h"
+#include "screens/Output.h"
 
 bool begins(char *pdest, char *pfind) {
   return !strncasecmp(pdest, pfind, strlen(pfind));
@@ -29,6 +30,35 @@ void strlcpy(char *pdest, const char *psrc, int max) {
   }
 
   *pdest = '\0';
+}
+
+void decodeUTF8(char *pdest, const char *psrc) {
+  char c;
+  uint16_t replacement;
+
+  do {
+    c = *psrc++;
+    replacement = 0;
+    if ((c & 0xE0) == 0xC0) {
+      // It's a 2 byte char, get the next byte to decode it. We only handle 2 byte characters.
+      replacement = ((c & 0x03) << 6) | (*psrc++ & 0x3F);
+    }
+    if (replacement) {
+      switch (replacement) {
+        case 0xF6:
+          c = O_UMLAUT;
+          break;
+        case 0xE9:
+          c = E_ACUTE;
+          break;
+        default:
+          c = replacement & 0x00FF;
+          break;
+      }
+    }
+    *pdest++ = c;
+
+  } while (c);
 }
 
 TaskHandle_t startTask(TaskFunction_t pcode, const char *const pname, void *const pparameters = 0) {

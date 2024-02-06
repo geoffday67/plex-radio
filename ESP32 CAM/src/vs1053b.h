@@ -1,6 +1,7 @@
 #pragma once
 
 #include "driver/spi_master.h"
+#include "freertos/event_groups.h"
 
 class VS1053b {
  private:
@@ -14,6 +15,7 @@ class VS1053b {
   static const uint8_t REGISTER_CLOCKF = 0x03;
   static const uint8_t REGISTER_WRAM = 0x06;
   static const uint8_t REGISTER_WRAM_ADDR = 0x07;
+  static const uint8_t REGISTER_VOL = 0x0B;
 
   static const uint16_t SM_RESET = 0x0004;
   static const uint16_t SM_CANCEL = 0x0008;
@@ -32,6 +34,10 @@ class VS1053b {
   void writeWram(uint16_t target, uint16_t value);
   uint16_t readWram(uint16_t target);
 
+  EventGroupHandle_t eventGroup;
+
+  static void DREQISR();
+
   void waitReady();
   void hardwareReset();
   void softwareReset();
@@ -43,7 +49,6 @@ class VS1053b {
   VS1053b(int cs, int dcs, int dreq, int reset);
   void begin();
   int getVersion();
-  void playFile();
-  void playUrl(char *purl);
-  void playChunk(uint8_t *pdata, int size);
+  void setVolume(int);
+  void sendChunk(uint8_t *pdata, int size);
 };

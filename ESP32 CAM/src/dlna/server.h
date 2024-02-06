@@ -20,11 +20,11 @@ class DLNAServer {
   DLNAServer(DLNAServer&);
   ~DLNAServer();
 
-  char baseDomain[128];
-  char descriptionURL[128];
-  char controlPath[128];
-  char id[128];
-  char name[128];
+  char baseDomain[URL_SIZE];
+  char descriptionURL[URL_SIZE];
+  char controlPath[URL_SIZE];
+  char id[ID_SIZE];
+  char name[NAME_SIZE];
 
   void browse(char *pid, int offset, int results, char *pfilter, int *pfound, ObjectCallback objectCallback);
 };

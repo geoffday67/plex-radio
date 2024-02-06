@@ -85,7 +85,6 @@ void DLNAServer::browse(char *pid, int offset, int results, char *pfilter, int *
   }
   presponse = new char[size + 1];
   n = esp_http_client_read(client, presponse, size);
-  ESP_LOGD(TAG, "%d response bytes read", n);
   esp_http_client_close(client);
 
   if (!pBrowseParser) {

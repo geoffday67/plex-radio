@@ -14,8 +14,8 @@ static const char *TAG = "DLNA";
 void classDLNA::findServers(ServerCallback serverCallback) {
   int client, length;
   struct sockaddr_in dest_addr, src_addr;
-  char *pbuffer;
-  char *pline, *pend;
+  char *pbuffer, *pline, *pend;
+  timeval timeout;
 
   // TODO Receive multiple responses for 5(?) seconds, at the moment only the first response is used.
 
@@ -35,42 +35,49 @@ void classDLNA::findServers(ServerCallback serverCallback) {
       "\n";
 
   length = sendto(client, packet, strlen(packet), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-  ESP_LOGD(TAG, "%d bytes sent", length);
+  ESP_LOGD(TAG, "%d bytes broadcast", length);
+
+  memset(&timeout, 0, sizeof timeout);
+  timeout.tv_sec = 5;
+  if (setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout) == 0) {
+    ESP_LOGI(TAG, "Socket timeout set");
+  } else {
+    ESP_LOGE(TAG, "Error setting socket timeout");
+  }
 
   pbuffer = new char[2048];
-  socklen_t src_length = sizeof src_addr;
-  length = recvfrom(client, pbuffer, 2048, 0, (sockaddr *)&src_addr, &src_length);
-  pbuffer[length] = 0;
-  ESP_LOGD(TAG, "%d bytes received from %s", length, inet_ntoa(src_addr.sin_addr));
 
-  DLNAServer *pserver = new DLNAServer;
+  while (1) {
+    socklen_t src_length = sizeof src_addr;
+    length = recvfrom(client, pbuffer, 2048, 0, (sockaddr *)&src_addr, &src_length);
+    if (length == -1) {
+      break;
+    }
+    pbuffer[length] = 0;
+    ESP_LOGD(TAG, "%d bytes received from %s", length, inet_ntoa(src_addr.sin_addr));
 
-  pline = pbuffer;
-  pend = strchr(pline, '\r');
-  while (pend) {
-    *pend = 0;
-    if (*pline) {
-      handleSearchLine(pline, pserver);
-    }
-    pline = pend + 1;
-    if (*pline == '\n') {
-      pline++;
-    }
+    DLNAServer *pserver = new DLNAServer;
+
+    pline = pbuffer;
     pend = strchr(pline, '\r');
-  }
-  delete[] pbuffer;
+    while (pend) {
+      *pend = 0;
+      if (*pline) {
+        handleSearchLine(pline, pserver);
+      }
+      pline = pend + 1;
+      if (*pline == '\n') {
+        pline++;
+      }
+      pend = strchr(pline, '\r');
+    }
 
-  // We should have location and id now, check if we've seen it before, if not add it to the result set.
-  /*if (presult->contains(pserver)) {
-    ESP_LOGD(TAG, "Duplicate ID found: %s", pserver->id);
+    fetchDescription(pserver);
+    (*serverCallback)(pserver);
     delete pserver;
-    continue;
-  }*/
+  }
 
-  fetchDescription(pserver);
-  ESP_LOGD(TAG, "Got new server %s", pserver->name);
-  (*serverCallback)(pserver);
-  delete pserver;
+  delete[] pbuffer;
 }
 
 esp_err_t classDLNA::httpEventHandler(esp_http_client_event_t *evt) {
@@ -79,8 +86,6 @@ esp_err_t classDLNA::httpEventHandler(esp_http_client_event_t *evt) {
 
 void classDLNA::handleSearchLine(char *pline, DLNAServer *pserver) {
   char *pid;
-
-  ESP_LOGI(TAG, "Processing line %s", pline);
 
   char *pname = pline;
   char *pseparator = strchr(pline, ':');
@@ -94,10 +99,10 @@ void classDLNA::handleSearchLine(char *pline, DLNAServer *pserver) {
   }
 
   if (!strcasecmp(pname, "Location")) {
-    strcpy(pserver->descriptionURL, pvalue);
+    strlcpy(pserver->descriptionURL, pvalue, URL_SIZE);
   } else if (!strcasecmp(pname, "USN")) {
     pid = extractID(pvalue);
-    strcpy(pserver->id, pid);
+    strlcpy(pserver->id, pid, ID_SIZE);
   }
 }
 
@@ -132,7 +137,7 @@ void classDLNA::fetchDescription(DLNAServer *pserver) {
   pdomain = strnthchr(pserver->descriptionURL, '/', 3);
   if (pdomain) {
     *pdomain = 0;
-    strcpy(pserver->baseDomain, pserver->descriptionURL);
+    strlcpy(pserver->baseDomain, pserver->descriptionURL, URL_SIZE);
   }
   ESP_LOGD(TAG, "Base domain is %s", pserver->baseDomain);
 
@@ -148,7 +153,6 @@ void classDLNA::fetchDescription(DLNAServer *pserver) {
   }
   presponse = new char[size + 1];
   n = esp_http_client_read(client, presponse, size);
-  ESP_LOGD(TAG, "%d bytes read", n);
   esp_http_client_close(client);
 
   descriptionBrowser.reset();
@@ -169,7 +173,7 @@ void classDLNA::parserCallback(char *pname, char *pvalue, void *pdata) {
 
   if (!strcasecmp(pname, "modelname") && pvalue) {
     DLNAServer *pserver = (DLNAServer *)pdata;
-    strcpy(pserver->name, pvalue);
+    strlcpy(pserver->name, pvalue, NAME_SIZE);
     ESP_LOGI(TAG, "Server name found: %s", pvalue);
   } else if (!strcasecmp(pname, "service") && !pvalue) {
     // A service block is starting, get its type and control URL.
@@ -177,17 +181,17 @@ void classDLNA::parserCallback(char *pname, char *pvalue, void *pdata) {
   } else if (!strcasecmp(pname, "service") && pvalue) {
     if (begins(pservice->type, "urn:schemas-upnp-org:service:ContentDirectory")) {
       DLNAServer *pserver = (DLNAServer *)pdata;
-      strcpy(pserver->controlPath, pservice->controlURL);
+      strlcpy(pserver->controlPath, pservice->controlURL, URL_SIZE);
       ESP_LOGI(TAG, "Content directory service found: %s", pservice->controlURL);
     }
     delete pservice;
   } else if (!strcasecmp(pname, "serviceType") && pvalue) {
     if (pservice) {
-      strcpy(pservice->type, pvalue);
+      strlcpy(pservice->type, pvalue, SERVICE_TYPE_SIZE);
     }
   } else if (!strcasecmp(pname, "controlURL") && pvalue) {
     if (pservice) {
-      strcpy(pservice->controlURL, pvalue);
+      strlcpy(pservice->controlURL, pvalue, URL_SIZE);
     }
   }
 }

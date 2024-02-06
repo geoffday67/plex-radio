@@ -6,8 +6,14 @@ enum SortOrder {
 };
 
 class classSettings {
-public:
+ private:
+  SortOrder currentOrder;
+
+ public:
+  classSettings() : currentOrder(Title) {}
+
   SortOrder getSortOrder();
+  void setSortOrder(SortOrder);
 };
 
 extern classSettings Settings;

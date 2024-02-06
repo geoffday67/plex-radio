@@ -15,6 +15,8 @@
 #define EVENT_MENU 5
 #define EVENT_SWITCH 6
 #define EVENT_BACK 7
+#define EVENT_STOP 8
+#define EVENT_PLAY 9
 
 /*****************************************************************************/
 class KeyEvent : public Event {
@@ -57,9 +59,24 @@ class SwitchEvent : public Event {
   bool pressed;
 };
 
+/*****************************************************************************/
 class BackEvent : public Event {
  public:
   BackEvent(bool pressed) : pressed(pressed), Event(EVENT_BACK) {}
+  bool pressed;
+};
+
+/*****************************************************************************/
+class StopEvent : public Event {
+ public:
+  StopEvent(bool pressed) : pressed(pressed), Event(EVENT_STOP) {}
+  bool pressed;
+};
+
+/*****************************************************************************/
+class PlayEvent : public Event {
+ public:
+  PlayEvent(bool pressed) : pressed(pressed), Event(EVENT_PLAY) {}
   bool pressed;
 };
 

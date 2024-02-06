@@ -8,6 +8,8 @@
 #include "freertos/task.h"
 #include "utils.h"
 
+VS1053b *pInstance;
+
 char VS1053b::TAG[] = "VS1053b";
 
 VS1053b::VS1053b(int cs, int dcs, int dreq, int reset) {
@@ -15,10 +17,17 @@ VS1053b::VS1053b(int cs, int dcs, int dreq, int reset) {
   dcsPin = dcs;
   dreqPin = dreq;
   resetPin = reset;
+  eventGroup = xEventGroupCreate();
+}
+
+void VS1053b::DREQISR() {
+  xEventGroupSetBitsFromISR(pInstance->eventGroup, 0x01, NULL);
 }
 
 void VS1053b::begin() {
   spi_device_interface_config_t dev_config;
+
+  pInstance = this;
 
   // Configure pins.
   gpio_set_direction((gpio_num_t)dreqPin, GPIO_MODE_INPUT);
@@ -74,7 +83,7 @@ void VS1053b::begin() {
   dev_config.queue_size = 1;
   spi_bus_add_device(SPI3_HOST, &dev_config, &handleData);
 
-  ESP_LOGI(TAG, "SPI initialised");
+  ESP_LOGI(TAG, "Data channel initialised");
 }
 
 void VS1053b::hardwareReset() {
@@ -90,6 +99,7 @@ void VS1053b::softwareReset() {
 }
 
 void VS1053b::waitReady() {
+  // xEventGroupWaitBits(eventGroup, 0x01, pdTRUE, pdTRUE, portMAX_DELAY);
   while (gpio_get_level((gpio_num_t)dreqPin) == 0) {
     taskYIELD();
   }
@@ -147,6 +157,18 @@ int VS1053b::getVersion() {
   return (value & 0x00F0) >> 4;
 }
 
+void VS1053b::setVolume(int volume) {
+  uint16_t value;
+
+  if (volume == 0) {
+    value = 0xFEFE;
+  } else {
+    value = 255 - (volume * 255 / 100);
+    value |= value << 8;
+  }
+  writeRegister(REGISTER_VOL, value);
+}
+
 uint8_t VS1053b::getEndFillByte() {
   uint16_t value = readWram(END_FILL_BYTE_ADDR);
   return (value & 0xFF);
@@ -187,93 +209,12 @@ void VS1053b::finaliseSong() {
   }
 }
 
-void VS1053b::playFile() {
-  FILE *input = fopen("/spiffs/sample.mp3", "rb");
-  uint8_t buffer[32];
-  int n, count;
+void VS1053b::sendChunk(uint8_t *pdata, int size) {
   spi_transaction_t transaction;
 
-  while (1) {
-    count = fread(buffer, 1, 32, input);
-    if (count == 0) {
-      break;
-    }
-
-    memset(&transaction, 0, sizeof transaction);
-    transaction.tx_buffer = buffer;
-    transaction.length = count * 8;
-
-    waitReady();
-    spi_device_transmit(handleData, &transaction);
-  }
-
-  fclose(input);
-
-  ESP_LOGD(TAG, "Data sent");
-
-  finaliseSong();
-}
-
-void VS1053b::playUrl(char *purl) {
-  esp_http_client_handle_t client;
-  esp_http_client_config_t config;
-  int length, n, count;
-  uint8_t buffer[32];
-  spi_transaction_t transaction;
-
-  memset(&config, 0, sizeof config);
-  config.url = purl;
-  config.user_agent = "Plex radio";
-  config.method = HTTP_METHOD_GET;
-  client = esp_http_client_init(&config);
-
-  esp_http_client_open(client, 0);
-  length = esp_http_client_fetch_headers(client);
-  ESP_LOGI(TAG, "Status code %d", esp_http_client_get_status_code(client));
-  ESP_LOGI(TAG, "Content length %d", length);
-
-  while (1) {
-    count = esp_http_client_read(client, (char *)buffer, 32);
-    ESP_LOGD(TAG, "%d bytes read", count);
-    if (count == 0) {
-      break;
-    }
-
-    memset(&transaction, 0, sizeof transaction);
-    transaction.tx_buffer = buffer;
-    transaction.length = count * 8;
-
-    waitReady();
-    spi_device_transmit(handleData, &transaction);
-  }
-  esp_http_client_close(client);
-  esp_http_client_cleanup(client);
-
-  finaliseSong();
-}
-
-void VS1053b::playChunk(uint8_t *pdata, int size) {
-  int count, offset, remaining;
-  spi_transaction_t transaction;
-
-  remaining = size;
-  offset = 0;
-
-  while (1) {
-    count = MIN(remaining, 32);
-
-    memset(&transaction, 0, sizeof transaction);
-    transaction.tx_buffer = pdata + offset;
-    transaction.length = count * 8;
-
-    waitReady();
-    spi_device_transmit(handleData, &transaction);
-
-    remaining -= count;
-    if (remaining == 0) {
-      break;
-    }
-    
-    offset += count;
-  }
+  memset(&transaction, 0, sizeof transaction);
+  transaction.tx_buffer = pdata;
+  transaction.length = size * 8;
+  waitReady();
+  spi_device_transmit(handleData, &transaction);
 }

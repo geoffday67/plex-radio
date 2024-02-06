@@ -3,5 +3,9 @@
 classSettings Settings;
 
 SortOrder classSettings::getSortOrder() {
-  return SortOrder::Title;
+  return currentOrder;
+}
+
+void classSettings::setSortOrder(SortOrder order) {
+  currentOrder = order;
 }

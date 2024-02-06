@@ -7,8 +7,8 @@
 
 class Service {
  private:
-  char type[128];
-  char controlURL[128];
+  char type[SERVICE_TYPE_SIZE];
+  char controlURL[URL_SIZE];
 
   friend class classDLNA;
 };

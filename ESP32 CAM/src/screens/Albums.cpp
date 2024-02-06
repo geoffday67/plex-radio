@@ -4,7 +4,7 @@
 
 #include "../data/data.h"
 #include "Tracks.h"
-// #include "utils.h"
+#include "utils.h"
 
 classAlbums Albums;
 
@@ -69,6 +69,8 @@ void classAlbums::handleSwitchEvent(SwitchEvent *pevent) {
 
 void classAlbums::showCurrent() {
   Album *palbum = palbums + current;
+  char artist[ARTIST_SIZE];
+  char title[TITLE_SIZE];
 
   /*Serial.println(palbum->artist);
   for (int n = 0; n < strlen(palbum->artist); n++) {
@@ -79,10 +81,18 @@ void classAlbums::showCurrent() {
   }
   Serial.println();*/
 
+  /*
+    Text (e.g. title) is encoded as UTF-8 which we need to translate to the right characters for display.
+    The character ROM on the LCD driver is the Japanese font so we use custom chars for the accent chars.
+    We only handle 2 byte characters.
+  */
+
   delete pscroll1;
-  pscroll1 = new Scroll(palbum->artist, 0);
+  decodeUTF8(artist, palbum->artist);
+  pscroll1 = new Scroll(artist, 0);
   pscroll1->begin();
   delete pscroll2;
-  pscroll2 = new Scroll(palbum->title, 1);
+  decodeUTF8(title, palbum->title);
+  pscroll2 = new Scroll(title, 1);
   pscroll2->begin();
 }

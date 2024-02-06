@@ -2,89 +2,293 @@
 
 #include <esp_task_wdt.h>
 
-#include "constants.h"
-#include "esp32-hal-log.h"
-#include "utils.h"
+#include <queue>
 
-extern void wifiWait(void);
+#include "constants.h"
+#include "driver/gpio.h"
+#include "esp32-hal-log.h"
+#include "esp_http_client.h"
+#include "freertos/stream_buffer.h"
+#include "utils.h"
+// #include "vs1053b-patches-flac.h"
+#include "vs1053b.h"
 
 static const char *TAG = "Player";
 
-classPlayer Player;
+extern void wifiWait(void);
+extern EventGroupHandle_t plexRadioGroup;
+extern void showStop(bool show);
 
-RingBuffer::RingBuffer(int size) {
-  this->size = size;
-  pData = new uint8_t[size];
-  if (pData) {
-    ESP_LOGI(TAG, "%d bytes allocated", size);
+namespace Player {
+
+#define AUDIO_MUTE 25
+
+#define VS1053_CS 21
+#define VS1053_DCS 22
+#define VS1053_DREQ 15
+#define VS1053_RESET 4
+
+#define STOP_FETCH 0x0001
+#define FETCH_FINISHED 0x0002
+#define PLAY_READY 0x0004
+#define PLAY_FINISHED 0x0008
+
+VS1053b *pVS1053b;
+
+EventGroupHandle_t eventGroup;
+
+std::queue<Track> playlist;
+Track currentTrack;
+
+StaticStreamBuffer_t audioStaticStream;
+StreamBufferHandle_t audioStream;
+uint8_t *paudioStreamBuffer;
+esp_http_client_handle_t httpClient;
+uint8_t *pHttpBuffer;
+bool paused, stoppingFetchTask, stoppingPlayTask, stopShowing;
+
+void mute(bool mute) {
+  // gpio_set_level((gpio_num_t)AUDIO_MUTE, !mute);
+  // setVolume(mute ? 0 : 100);
+}
+
+void playTask(void *pparms) {
+  uint8_t buffer[32];
+  int count;
+
+  // TODO How to know when file has finished? Does it matter? Maybe task runs forever.
+  ESP_LOGD(TAG, "Play task starting");
+
+  while (1) {
+    // Wait for 32 bytes of sound data to be available.
+    // Only wait for 1 second in case we're stopping.
+    // TODO Use timeout and report error.
+    count = xStreamBufferReceive(audioStream, buffer, 32, pdMS_TO_TICKS(1000));
+
+    // If we're stopping then quit the loop.
+    if (stoppingPlayTask) {
+      break;
+    }
+
+    if (count > 0) {
+      pVS1053b->sendChunk(buffer, count);
+    }
+  }
+
+  ESP_LOGD(TAG, "Play task quitting");
+
+  // Tell observers that we're done.
+  xEventGroupSetBits(eventGroup, PLAY_FINISHED);
+  vTaskDelete(NULL);
+}
+
+void fetchTask(void *pparam) {
+  char *purl = (char *)pparam;
+  int length, count, sent;
+  bool done;
+  esp_http_client_config_t httpConfig;
+
+  ESP_LOGI(TAG, "Fetch task starting for %s", purl);
+
+  pHttpBuffer = new uint8_t[10240];
+
+  memset(&httpConfig, 0, sizeof httpConfig);
+  httpConfig.url = purl;
+  httpConfig.user_agent = "Plex radio";
+  httpConfig.method = HTTP_METHOD_GET;
+  httpClient = esp_http_client_init(&httpConfig);
+  // TODO Check for error and report it back.
+
+  esp_http_client_open(httpClient, 0);
+  length = esp_http_client_fetch_headers(httpClient);
+  ESP_LOGI(TAG, "Status code %d, content length %d", esp_http_client_get_status_code(httpClient), length);
+
+  done = false;
+  while (!done) {
+    count = esp_http_client_read(httpClient, (char *)pHttpBuffer, 10240);
+    if (count == 0) {
+      break;
+    }
+
+    if (stoppingFetchTask) {
+      break;
+    }
+
+    // TODO Use timeout and report error.
+    // Timeout after a second so we can check if we're stopping.
+    sent = 0;
+    do {
+      sent += xStreamBufferSend(audioStream, pHttpBuffer, count, pdMS_TO_TICKS(1000));
+      if (stoppingFetchTask) {
+        done = true;
+        break;
+      }
+    } while (sent != count);
+  }
+
+  esp_http_client_close(httpClient);
+  esp_http_client_cleanup(httpClient);
+  delete[] pHttpBuffer;
+
+  ESP_LOGD(TAG, "Fetch task quitting");
+
+  // Tell observers that we're done.
+  xEventGroupSetBits(eventGroup, FETCH_FINISHED);
+  vTaskDelete(NULL);
+}
+
+void startPlayTask() {
+  if (audioStream) {
+    xEventGroupClearBits(eventGroup, PLAY_FINISHED);
+    stoppingPlayTask = false;
+    startTask(playTask, "play");
+
+    stopShowing = true;
+    showStop(true);
+  }
+}
+
+void stopPlayTask() {
+  uint8_t dummy[32];
+
+  stoppingPlayTask = true;
+
+  // If there's an audio stream then write 32 bytes to it to make sure play task is unblocked.
+  if (audioStream) {
+    memset(dummy, 0, 32);
+    // ONLY A SINGLE PROCESS CAN SEND TO THE STREAM!!!
+    //xStreamBufferSend(audioStream, dummy, 32, portMAX_DELAY);
+  }
+
+  // Finished bit will already be set if previous play task is finished or never started.
+  xEventGroupWaitBits(eventGroup, PLAY_FINISHED, pdFALSE, pdFALSE, pdMS_TO_TICKS(5000));
+  ESP_LOGD(TAG, "Play task stopped");
+}
+
+void startFetchTask(char *purl) {
+  if (audioStream) {
+    xEventGroupClearBits(eventGroup, FETCH_FINISHED);
+    stoppingFetchTask = false;
+    startTask(fetchTask, "fetch", purl);
+  }
+}
+
+void stopFetchTask() {
+  stoppingFetchTask = true;
+
+  // TODO How to make sure fetch task is unblocked? Only applies if fetch has not completed as otherwise task is already stopped.
+  xEventGroupWaitBits(eventGroup, FETCH_FINISHED, pdFALSE, pdFALSE, 5000);
+  ESP_LOGD(TAG, "Fetch task stopped");
+}
+
+void stopPlay() {
+  uint8_t dummy[32];
+
+  // TODO Mute audio while changing tasks/stream.
+  mute(true);
+
+  stopPlayTask();
+  stopFetchTask();
+
+  if (audioStream) {
+    vStreamBufferDelete(audioStream);
+    audioStream = 0;
+    ESP_LOGD(TAG, "Audio stream deleted");
   } else {
-    ESP_LOGE(TAG, "Error allocating %d bytes", size);
+    ESP_LOGD(TAG, "Audio stream not yet created");
   }
-  head = 0;
-  tail = 0;
 }
 
-RingBuffer::~RingBuffer() {
-  delete[] pData;
-}
-
-int RingBuffer::space(void) {
-  // Don't let the buffer become completely full or head will equal tail again and it will look like it's emopty.
-  int space = tail - head - 1;
-  if (space < 0) {
-    space += size;
+void pausePlay(bool pause) {
+  if (pause) {
+    // Stop the playing task, the fetch task will evetually block too if it's running.
+    stopPlayTask();
+  } else {
+    // Start the playing task, the fetch task will unblock when it can and add to the buffer again if it's still running.
+    startPlayTask();
   }
-  return space;
 }
 
-int RingBuffer::available() {
-  int available = head - tail;
-  if (available < 0) {
-    available += size;
+void playUrl(char *purl) {
+  wifiWait();
+  ESP_LOGI(TAG, "WiFi connected");
+
+  audioStream = xStreamBufferCreateStatic(3000000, 32, paudioStreamBuffer, &audioStaticStream);
+  ESP_LOGD(TAG, "Audio stream created");
+
+  paused = false;
+  mute(false);
+
+  startPlayTask();
+  startFetchTask(purl);
+}
+
+void stopButtonTask(void *pparams) {
+  uint16_t e;
+
+  while (1) {
+    if (xEventGroupWaitBits(plexRadioGroup, STOP_BIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(500)) & STOP_BIT) {
+      paused = !paused;
+      if (paused) {
+        stopShowing = false;
+        showStop(false);
+      }
+      Player::pausePlay(paused);
+      continue;
+    }
+
+    // We timed out, toggle the indicator if we're currently pausing.
+    if (paused) {
+      stopShowing = !stopShowing;
+      showStop(stopShowing);
+    }
   }
-  return available;
 }
 
-void RingBuffer::clear() {
-  tail = head;
+void playNext() {
+  if (playlist.size() > 0) {
+    currentTrack = playlist.front();
+    playlist.pop();
+    stopPlay();
+    playUrl(currentTrack.resource);
+  }
 }
 
-classPlayer::classPlayer() {
-  pVS1053b = 0;
-  pBuffer = 0;
-  readHandle = 0;
+void addToPlaylist(Track *ptrack) {
+  playlist.push(*ptrack);
+  playNext();
 }
 
-classPlayer::~classPlayer() {
-  delete pVS1053b;
-  delete pBuffer;
+void clearPlaylist() {
+  while (playlist.size() > 0) {
+    playlist.pop();
+  }
 }
 
-/*
-Interrupt-driven sending.
-Interrupt happens when DREQ is high but don't want continuous interrupts.
-  Enable this interrupt only when playing a song?
-During ISR:
-  Check there's at least 32 bytes of data to send.
-  We know that DREQ's high so send immediately.
-  Only send 32 bytes then return so as to keep the ISR quick.
-*/
+void resetPlaylist(Track *ptrack) {
+  clearPlaylist();
+  addToPlaylist(ptrack);
+}
 
-bool classPlayer::begin() {
+bool begin() {
   bool result = false;
+
+  eventGroup = xEventGroupCreate();
+
+  // Mark the tasks as finished so a call to stop it returns immediately.
+  xEventGroupSetBits(eventGroup, PLAY_FINISHED);
+  xEventGroupSetBits(eventGroup, FETCH_FINISHED);
 
   pVS1053b = new VS1053b(VS1053_CS, VS1053_DCS, VS1053_DREQ, VS1053_RESET);
   pVS1053b->begin();
 
-  pBuffer = new RingBuffer(3000000);
-  dataHandle = startTask(dataTask, "data", this);
-  ESP_LOGI(TAG, "Data task created");
+  // This will get allocated in PSRAM, mapped to normal address space.
+  paudioStreamBuffer = new uint8_t[3000000];
 
-  playlistLock = portMUX_INITIALIZER_UNLOCKED;
-  playlisthandle = startTask(playlistTask, "playlist", this);
-  ESP_LOGI(TAG, "Playlist task created");
+  // gpio_set_direction((gpio_num_t)AUDIO_MUTE, GPIO_MODE_OUTPUT);
 
-  // startTask(debugTask, "debug", this);
+  // Watch for presses on the "stop" button.
+  startTask(stopButtonTask, "stop_button");
 
   result = true;
 
@@ -92,245 +296,8 @@ exit:
   return result;
 }
 
-void classPlayer::setVolume(int volume) {
-  // pVS1053->setVolume(volume);
+void setVolume(int volume) {
+  pVS1053b->setVolume(volume);
 }
 
-/*
-Only send when DREQ asserted.
-Check for endedness and rising/falling clock sync, page 17.
-Be aware of minimum clock pulse widths, which are based on CLKI cycles, page 18.
-Library SPI maybe has too much overhead - write our own for this part?
-*/
-
-// Send data from the ring buffer to the VS1053.
-void classPlayer::dataTask(void *pdata) {
-  classPlayer *pthis = (classPlayer *)pdata;
-  RingBuffer *pring = pthis->pBuffer;
-  int count, chunk;
-
-  while (true) {
-    count = MIN(pring->available(), 10000);
-    if (count > 0) {
-      if (pring->head > pring->tail) {
-        pthis->pVS1053b->playChunk(pring->pTail(), count);
-      } else {
-        chunk = MIN(pring->size - pring->tail, count);
-        pthis->pVS1053b->playChunk(pring->pTail(), chunk);
-        chunk = count - chunk;
-        if (chunk > 0) {
-          pthis->pVS1053b->playChunk(pring->pData, chunk);
-        }
-      }
-
-      pring->tail += count;
-      if (pring->tail > pring->size) {
-        pring->tail -= pring->size;
-      }
-
-      if (!pthis->isPlaying) {
-        pthis->pBuffer->clear();
-        continue;
-      }
-    }
-
-    taskYIELD();
-  }
-}
-
-// Fetch data from the network and add it to the ring buffer.
-void classPlayer::readTask(void *pdata) {
-  classPlayer *pPlayer = (classPlayer *)pdata;
-  RingBuffer *pring = pPlayer->pBuffer;
-  int processed, size, count, space, available, chunk;
-  unsigned long start;
-  bool task_started = false;
-  TaskHandle_t dataHandle;
-
-  size = esp_http_client_get_content_length(pPlayer->httpClient);
-
-  ESP_LOGI(TAG, "%d bytes total", size);
-  processed = 0;
-  pPlayer->isPlaying = true;
-
-  while (processed < size) {
-    if (pPlayer->stopPlay) {
-      break;
-    }
-
-    space = pPlayer->pBuffer->space();
-    if (space == 0) {
-      vTaskDelay(50);
-      continue;
-    }
-
-    /*start = millis();
-    while ((available = wifiClient.available()) == 0) {
-      if (millis() - start > 5000) {
-        Serial.println("Timeout waiting for resource response");
-        goto exit;
-      }
-      vTaskDelay(10);
-    }*/
-
-    // "count" is the total number of bytes we're going to add to the buffer.
-    count = MIN(available, space);
-
-    if (pPlayer->pBuffer->head >= pPlayer->pBuffer->tail) {
-      // Write from the head to buffer end, then from buffer start to the tail if there's more to write.
-      chunk = MIN(pPlayer->pBuffer->size - pPlayer->pBuffer->head, count);
-      count = esp_http_client_read(pPlayer->httpClient, (char *)pPlayer->pBuffer->pHead(), chunk);
-
-      chunk = count - chunk;
-      if (chunk > 0) {
-        esp_http_client_read(pPlayer->httpClient, (char *)pPlayer->pBuffer->pData, chunk);
-      }
-    } else {
-      // Write everything at head.
-      esp_http_client_read(pPlayer->httpClient, (char *)pPlayer->pBuffer->pHead(), count);
-    }
-
-    // Bump the buffer head but only set it once as that's what triggers the sending process.
-    if (pPlayer->pBuffer->head + count > pPlayer->pBuffer->size) {
-      pPlayer->pBuffer->head += count - pPlayer->pBuffer->size;
-    } else {
-      pPlayer->pBuffer->head += count;
-    }
-
-    /*if (!task_started && pPlayer->pBuffer->available() > 100000) {
-      xTaskCreatePinnedToCore(
-          dataTask,
-          "Data task",
-          ARDUINO_STACK,
-          pPlayer,
-          ARDUINO_PRIORITY,
-          &dataHandle,
-          ARDUINO_CORE);
-
-      task_started = true;
-      Serial.println("Data task created");
-    }*/
-
-    /*if (task_started) {
-      vTaskResume(dataHandle);
-    }*/
-
-    // Bump the total amount processed of the response.
-    processed += count;
-
-    taskYIELD();
-  }
-
-exit:
-  // pPlayer->pHttpClient->end();
-  ESP_LOGI(TAG, "Finished playing");
-  pPlayer->isPlaying = false;
-
-  // TODO Wait for buffer to be empty then delete the task.
-  vTaskDelete(NULL);
-}
-
-void classPlayer::debugTask(void *pdata) {
-  while (1) {
-    classPlayer *pplayer = (classPlayer *)pdata;
-    RingBuffer *pbuffer = pplayer->pBuffer;
-    // Serial.println(pbuffer->available());
-    vTaskDelay(100);
-  }
-}
-
-// Start playing a track by requesting data from the server and creating a task to keep reading it into the ring buffer.
-void classPlayer::startPlay() {
-  esp_http_client_config_t config;
-
-  wifiWait();
-  ESP_LOGI(TAG, "WiFi ready");
-
-  // Stop any existing play before starting the new one.
-  if (isPlaying) {
-    stopPlay = true;
-    while (isPlaying) {
-      vTaskDelay(10);
-    }
-    pBuffer->clear();
-  }
-
-  ESP_LOGI(TAG, "Requesting track %s from %s", currentTrack.title, currentTrack.resource);
-
-  memset(&config, 0, sizeof config);
-  config.url = currentTrack.resource;
-  config.user_agent = "Plex radio";
-  config.method = HTTP_METHOD_GET;
-  httpClient = esp_http_client_init(&config);
-
-  esp_http_client_open(httpClient, 0);
-  esp_http_client_fetch_headers(httpClient);
-
-  int code = esp_http_client_get_status_code(httpClient);
-  ESP_LOGI(TAG, "Got code %d loading resource", code);
-  if (code != 200) {
-    goto exit;
-  }
-
-  stopPlay = false;
-  startTask(readTask, "read", this);
-
-exit:
-  return;
-}
-
-/*
-Keep a playlist as a queue of tracks. Play the next track when one is finished (maybe with pause).
-*/
-
-void classPlayer::playlistTask(void *pdata) {
-  classPlayer *pplayer = (classPlayer *)pdata;
-
-  while (1) {
-    // Only start a track playing if there isn't one already playing (TODO), and the queue isn't empty.
-    taskENTER_CRITICAL(&pplayer->playlistLock);
-
-    if (pplayer->playlist.size() == 0) {
-      taskEXIT_CRITICAL(&pplayer->playlistLock);
-      vTaskSuspend(NULL);
-      continue;
-    }
-
-    pplayer->currentTrack = pplayer->playlist.front();
-    pplayer->playlist.pop();
-    taskEXIT_CRITICAL(&pplayer->playlistLock);
-
-    pplayer->startPlay();
-  }
-}
-
-void classPlayer::addToPlaylist(Track *ptrack) {
-  taskENTER_CRITICAL(&playlistLock);
-  playlist.push(*ptrack);
-  taskEXIT_CRITICAL(&playlistLock);
-  vTaskResume(playlisthandle);
-}
-
-void classPlayer::clearPlaylist() {
-  taskENTER_CRITICAL(&playlistLock);
-  while (playlist.size() > 0) {
-    playlist.pop();
-  }
-  taskEXIT_CRITICAL(&playlistLock);
-}
-
-void classPlayer::resetPlaylist(Track *ptrack) {
-  taskENTER_CRITICAL(&playlistLock);
-  clearPlaylist();
-  addToPlaylist(ptrack);
-  taskEXIT_CRITICAL(&playlistLock);
-}
-
-void classPlayer::stop() {
-  if (isPlaying) {
-    stopPlay = true;
-    while (isPlaying) {
-      vTaskDelay(10);
-    }
-  }
-}
+}  // namespace Player
