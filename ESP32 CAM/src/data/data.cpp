@@ -29,7 +29,7 @@ bool classData::initDatabase() {
     goto exit;
   }
 
-  rc = sqlite3_create_collation(database, "BLAHX", SQLITE_UTF8, NULL, collateNatural);
+  rc = sqlite3_create_collation(database, "IGNORETHE", SQLITE_UTF8, NULL, collateIgnoreThe);
   if (rc != SQLITE_OK) {
     Serial.printf("Can't create collation: %s\n", sqlite3_errmsg(database));
     goto exit;
@@ -42,9 +42,19 @@ exit:
   return result;
 }
 
-int classData::collateNatural(void *pdata, int length1, const void *pstring1, int length2, const void *pstring2) {
-  ESP_LOGD(TAG, "Collation called with lengths %d and %d", length1, length2);
-  return length1 - length2;
+int classData::collateIgnoreThe(void *pdata, int length1, const void *pstring1, int length2, const void *pstring2) {
+  char *ps1 = (char *)pstring1;
+  char *ps2 = (char *)pstring2;
+
+  if (!sqlite3_stricmp(ps1, "the ")) {
+    ps1 += 4;
+  }
+
+  if (!sqlite3_stricmp(ps2, "the ")) {
+    ps2 += 4;
+  }
+
+  return sqlite3_stricmp(ps1, ps2);
 }
 
 void classData::clearAll() {
@@ -254,9 +264,9 @@ exit_count:
   // Allocate space and get the albums themselves.
   *ppresult = new Album[count];
   if (Settings.getSortOrder() == SortOrder::Artist) {
-    rc = sqlite3_prepare_v2(database, "SELECT id, title, artist FROM albums ORDER BY artist", -1, &stmt, NULL);
+    rc = sqlite3_prepare_v2(database, "SELECT id, title, artist FROM albums ORDER BY artist COLLATE IGNORETHE", -1, &stmt, NULL);
   } else {
-    rc = sqlite3_prepare_v2(database, "SELECT id, title, artist FROM albums ORDER BY title", -1, &stmt, NULL);
+    rc = sqlite3_prepare_v2(database, "SELECT id, title, artist FROM albums ORDER BY title COLLATE IGNORETHE", -1, &stmt, NULL);
   }
   if (rc != SQLITE_OK) {
     ESP_LOGE(TAG, "Error during preparation code %d", sqlite3_extended_errcode(database));

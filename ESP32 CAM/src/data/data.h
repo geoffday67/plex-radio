@@ -9,7 +9,7 @@ class classData {
  private:
   sqlite3 *database;
   bool initDatabase();
-  static int collateNatural (void *, int, const void *, int, const void *);
+  static int collateIgnoreThe (void *, int, const void *, int, const void *);
   sqlite3_stmt *trackStatement;
 
  public:
