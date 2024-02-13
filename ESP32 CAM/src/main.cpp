@@ -81,7 +81,6 @@ Debouncer *pPlayDebouncer;
 int getStopValue() {
   return digitalRead(STOP_BUTTON) == 0;
 }
-
 void stopChanged(int value) {
   if (value) {
     xEventGroupSetBits(plexRadioGroup, STOP_BIT);
@@ -117,103 +116,71 @@ bool wifiWait() {
   return true;
 }
 
-DLNAServer *pPlex;
+#include "ring.h"
 
-void onServerFound(DLNAServer *pserver) {
-  // TODO Check that this is a Plex server, and maybe that we haven't seen it before.
-  delete pPlex;
-  pPlex = new DLNAServer(*pserver);
-  ESP_LOGI(TAG, "Server found: %s", pserver->name);
+void check(char *message, int expected, int actual) {
+  ESP_LOGI(TAG, "%s, should be %d, is %d", message, expected, actual);
+  if (expected != actual) {
+    ESP_LOGE(TAG, "!! FAIL !!");
+  }
 }
 
-void onAlbumFound(Object *pobject) {
-  // Parse apart the album name to get the title and artist.
-  // This is probably Plex-format specific.
-  static std::regex regexYear(" \\(\\d\\d\\d\\d\\)$");
-  static std::cmatch matchYear;
+void ringTest() {
+  RingBuffer ring(5, plexRadioGroup);
+  EventBits_t threshold = 0x0001;
+  EventBits_t room = 0x0002;
+  uint8_t data[] = {1, 2, 3, 4, 5}, buffer[5];
 
-  Album *palbum = new Album;
-  char *pname, *pseparator;
+  ring.setThreshold(3, threshold);
+  ring.setRoom(2, room);
 
-  strlcpy(palbum->id, pobject->id, ID_SIZE);
+  check("Space", 5, ring.room());
+  check("Available", 0, ring.available());
+  check ("Threshold flag", 0, xEventGroupGetBits(plexRadioGroup) & threshold);
+  check ("Room flag", room, xEventGroupGetBits(plexRadioGroup) & room);
 
-  pname = strdup(pobject->name);
+  ring.put(data, 3);
+  check("Space", 2, ring.room());
+  check("Available", 3, ring.available());
+  check ("Threshold flag", threshold, xEventGroupGetBits(plexRadioGroup) & threshold);
+  check ("Room flag", room, xEventGroupGetBits(plexRadioGroup) & room);
 
-  std::regex_search(pname, matchYear, regexYear);
-  if (!matchYear.empty()) {
-    pname[matchYear.position(0)] = 0;
-  }
+  ring.get(buffer, 3);
+  check("Fetch 1", 1, buffer[0]);
+  check("Fetch 2", 2, buffer[1]);
+  check("Fetch 3", 3, buffer[2]);
+  check("Space", 5, ring.room());
+  check("Available", 0, ring.available());
+  check ("Threshold flag", 0, xEventGroupGetBits(plexRadioGroup) & threshold);
+  check ("Room flag", room, xEventGroupGetBits(plexRadioGroup) & room);
 
-  pseparator = strstr(pname, " - ");
-  if (pseparator) {
-    *pseparator = 0;
-    strlcpy(palbum->artist, pname, ARTIST_SIZE);
-    strlcpy(palbum->title, pseparator + 3, TITLE_SIZE);
-  } else {
-    strlcpy(palbum->title, pname, TITLE_SIZE);
-  }
+  ring.put(data, 5);
+  check("Space", 0, ring.room());
+  check("Available", 5, ring.available());
+  check ("Threshold flag", threshold, xEventGroupGetBits(plexRadioGroup) & threshold);
+  check ("Room flag", 0, xEventGroupGetBits(plexRadioGroup) & room);
 
-  free(pname);
+  ring.get(buffer, 5);
+  check("Fetch 1", 1, buffer[0]);
+  check("Fetch 5", 5, buffer[4]);
+  check("Space", 5, ring.room());
+  check("Available", 0, ring.available());
+  check ("Threshold flag", 0, xEventGroupGetBits(plexRadioGroup) & threshold);
+  check ("Room flag", room, xEventGroupGetBits(plexRadioGroup) & room);
 
-  Data.storeAlbum(palbum);
-  Serial.printf("Stored album: %s\n", palbum->title);
+  ring.put(data, 2);
+  check("Space", 3, ring.room());
+  check("Available", 2, ring.available());
+  check ("Threshold flag", 0, xEventGroupGetBits(plexRadioGroup) & threshold);
+  check ("Room flag", room, xEventGroupGetBits(plexRadioGroup) & room);
 
-  delete palbum;
-}
-
-char albumId[ID_SIZE];
-
-void onTrackFound(Object *pobject) {
-  Track *ptrack = new Track;
-  strlcpy(ptrack->id, pobject->id, ID_SIZE);
-  strlcpy(ptrack->title, pobject->name, TITLE_SIZE);
-  strlcpy(ptrack->resource, pobject->resource, RESOURCE_SIZE);
-  strlcpy(ptrack->album, albumId, ID_SIZE);
-  Data.storeTrack(ptrack);
-  Serial.printf("Stored track: %s\n", ptrack->title);
-  delete ptrack;
-}
-
-void refreshData() {
-  int n, count, offset, found;
-
-  Serial.printf("Free memory: %d\n", esp_get_free_heap_size());
-
-  Data.clearAll();
-  Serial.println("Database cleared");
-
-  // Fetch all the albums first and add them to the database.
-  offset = 0;
-  while (1) {
-    // TODO Get this object ID dynnamically.
-    // Request N album records, if none were found then we're done.
-    Data.startTransaction();
-    pPlex->browse("9b55ecd3e74c09febffe", offset, 10, "dc:title", &found, onAlbumFound);
-    Data.endTransaction();
-    break;  // TESTING
-    if (found == 0) {
-      break;
-    }
-    offset += found;
-  }
-
-  // Fetch the list of albums from the database and get the tracks for each.
-  Album *palbums, *palbum;
-  count = Data.getAlbums(&palbums);
-  Serial.printf("%d albums fetched\n", count);
-  for (n = 0; n < count; n++) {
-    palbum = palbums + n;
-    Serial.printf("Getting tracks for album %s BY %s\n", palbum->title, palbum->artist);
-    strcpy(albumId, palbum->id);
-    Data.beginStoreTracks();
-    pPlex->browse(palbum->id, 0, 100, "res", NULL, onTrackFound);
-    Data.endStoreTracks();
-  }
-  delete[] palbums;
-
-  Data.dumpDatabase();
-
-  Serial.printf("Free memory: %d\n", esp_get_free_heap_size());
+  ring.get(buffer, 2);
+  check("Fetch 1", 1, buffer[0]);
+  check("Fetch 2", 2, buffer[1]);
+  check("Space", 5, ring.room());
+  check("Available", 0, ring.available());
+  check ("Threshold flag", 0, xEventGroupGetBits(plexRadioGroup) & threshold);
+  check ("Room flag", room, xEventGroupGetBits(plexRadioGroup) & room);
 }
 
 void setup() {
@@ -229,7 +196,7 @@ void setup() {
 
   plexRadioGroup = xEventGroupCreate();
   esp_event_loop_create_default();
-  Serial.println("Event group created");
+  Serial.println("Event groups created");
 
   wifiBegin();
   Serial.println("WiFi initialisation started");
@@ -256,7 +223,7 @@ void setup() {
 
   pinMode(PLAY_BUTTON, INPUT);
   pPlayDebouncer = new Debouncer(getPlayValue, playChanged, 100);
-  PlayButton::begin(PlayButton::State::Flashing); // Flash while we connect WiFi.
+  PlayButton::begin(PlayButton::State::Flashing);  // Flash while we connect WiFi.
   Serial.println("Play button initialised");
 
   pinMode(STOP_BUTTON, INPUT);

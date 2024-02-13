@@ -5,7 +5,6 @@
 #include "../data/data.h"
 #include "../player.h"
 #include "Albums.h"
-#include "utils.h"
 
 classTracks Tracks;
 
@@ -15,7 +14,6 @@ void classTracks::setAlbum(Album *palbum) {
 
 void classTracks::activate() {
   int n;
-  char title[TITLE_SIZE];
 
   EventManager.addListener(EVENT_ENCODER, this);
   EventManager.addListener(EVENT_SWITCH, this);
@@ -24,8 +22,7 @@ void classTracks::activate() {
   count = Data.getTracks(pAlbum->id, &ptracks);
   current = 0;
 
-  decodeUTF8(title, pAlbum->title);
-  pscroll1 = new Scroll(title, 0);
+  pscroll1 = new Scroll(pAlbum->title, 0);
   pscroll1->begin();
   pscroll2 = 0;
 
@@ -66,7 +63,7 @@ void classTracks::handleSwitchEvent(SwitchEvent *pevent) {
   if (pevent->pressed) {
     Track *ptrack = ptracks + current;
     Serial.printf("Encoder pressed on track %s\n", ptrack->title);
-    Player::resetPlaylist(ptrack);
+    Player::playTrack(ptrack);
   }
 }
 
@@ -80,10 +77,8 @@ void classTracks::handleBackEvent(BackEvent *pevent) {
 
 void classTracks::showCurrent() {
   Track *ptrack = ptracks + current;
-  char title[TITLE_SIZE];
 
   delete pscroll2;
-  decodeUTF8(title, ptrack->title);
-  pscroll2 = new Scroll(title, 1);
+  pscroll2 = new Scroll(ptrack->title, 1);
   pscroll2->begin();
 }

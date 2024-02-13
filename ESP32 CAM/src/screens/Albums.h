@@ -13,6 +13,8 @@ class classAlbums : public Screen, EventReceiver {
   void showCurrent();
   void handleEncoderEvent(EncoderEvent*);
   void handleSwitchEvent(SwitchEvent*);
+  void handlePlayEvent(PlayEvent*);
+  void handleBackEvent(BackEvent*);
   Scroll *pscroll1, *pscroll2;
 
  public:

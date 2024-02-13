@@ -3,8 +3,8 @@
 #include <Arduino.h>
 
 #include "../data/data.h"
+#include "../player.h"
 #include "Tracks.h"
-#include "utils.h"
 
 classAlbums Albums;
 
@@ -13,6 +13,8 @@ void classAlbums::activate() {
 
   EventManager.addListener(EVENT_ENCODER, this);
   EventManager.addListener(EVENT_SWITCH, this);
+  EventManager.addListener(EVENT_PLAY, this);
+  EventManager.addListener(EVENT_BACK, this);
 
   // Get all the albums (175 albums => 60K ish).
   // Keep index/pointer to current one, update and display as encoder events received.
@@ -43,6 +45,12 @@ bool classAlbums::onEvent(Event *pevent) {
     case EVENT_SWITCH:
       handleSwitchEvent((SwitchEvent *)pevent);
       break;
+    case EVENT_PLAY:
+      handlePlayEvent((PlayEvent *)pevent);
+      break;
+      case EVENT_BACK:
+      handleBackEvent((BackEvent *)pevent);
+      break;
   }
   return true;
 }
@@ -67,32 +75,31 @@ void classAlbums::handleSwitchEvent(SwitchEvent *pevent) {
   }
 }
 
+void classAlbums::handlePlayEvent(PlayEvent *pevent) {
+  int count;
+  Track *ptracks;
+
+  if (pevent->pressed) {
+    Album *palbum = palbums + current;
+    Serial.printf("Play pressed on album %s\n", palbum->title);
+    count = Data.getTracks(palbum->id, &ptracks);
+    Player::pPlaylist->set(ptracks, count);
+  }
+}
+
+void classAlbums::handleBackEvent(BackEvent *pevent) {
+  if (pevent->pressed) {
+    Player::skipToNext();
+  }
+}
+
 void classAlbums::showCurrent() {
   Album *palbum = palbums + current;
-  char artist[ARTIST_SIZE];
-  char title[TITLE_SIZE];
-
-  /*Serial.println(palbum->artist);
-  for (int n = 0; n < strlen(palbum->artist); n++) {
-    if (palbum->artist[n] == 0xC3) {
-      palbum->artist[n] = 148;
-    }
-    Serial.printf("[0x%02X]", palbum->artist[n]);
-  }
-  Serial.println();*/
-
-  /*
-    Text (e.g. title) is encoded as UTF-8 which we need to translate to the right characters for display.
-    The character ROM on the LCD driver is the Japanese font so we use custom chars for the accent chars.
-    We only handle 2 byte characters.
-  */
 
   delete pscroll1;
-  decodeUTF8(artist, palbum->artist);
-  pscroll1 = new Scroll(artist, 0);
+  pscroll1 = new Scroll(palbum->artist, 0);
   pscroll1->begin();
   delete pscroll2;
-  decodeUTF8(title, palbum->title);
-  pscroll2 = new Scroll(title, 1);
+  pscroll2 = new Scroll(palbum->title, 1);
   pscroll2->begin();
 }

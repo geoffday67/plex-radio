@@ -53,21 +53,13 @@ void classOutput::addChar(int x, int y, char c) {
   }
 }
 
-void classOutput::setRawLine(int y, const char *ptext) {
+void classOutput::setLine(int y, const char *ptext) {
   char line[OUTPUT_WIDTH + 1];
 
   memset(line, ' ', OUTPUT_WIDTH);
   line[OUTPUT_WIDTH] = 0;
   memcpy(line, ptext, MIN(strlen(ptext), OUTPUT_WIDTH));
   addText(0, y, line);
-}
-
-void classOutput::setLine(int y, const char *ptext) {
-  char *pdecoded = new char[strlen(ptext) + 1];
-
-  decodeUTF8(pdecoded, ptext);
-  setRawLine(y, pdecoded);
-  delete[] pdecoded;
 }
 
 void classOutput::clear() {

@@ -25,7 +25,6 @@ class classOutput {
   virtual void addText(int x, int y, const char *ptext);
   virtual void addChar(int x, int y, char c);
   virtual void setLine(int y, const char *ptext);
-  virtual void setRawLine(int y, const char *ptext);
   virtual void clear();
 };
 

@@ -2,7 +2,10 @@
 
 #include <SPIFFS.h>
 
+#include "esp32-hal-log.h"
 #include "settings.h"
+
+static const char *TAG = "Data";
 
 classData Data;
 
@@ -26,11 +29,12 @@ bool classData::initDatabase() {
     goto exit;
   }
 
-  /*rc = sqlite3_create_collation(database, "NATURAL", SQLITE_UTF8, NULL, collateNatural);
+  rc = sqlite3_create_collation(database, "BLAHX", SQLITE_UTF8, NULL, collateNatural);
   if (rc != SQLITE_OK) {
     Serial.printf("Can't create collation: %s\n", sqlite3_errmsg(database));
     goto exit;
-  }*/
+  }
+  ESP_LOGI(TAG, "Collation created");
 
   result = true;
 
@@ -39,7 +43,7 @@ exit:
 }
 
 int classData::collateNatural(void *pdata, int length1, const void *pstring1, int length2, const void *pstring2) {
-  Serial.printf("Collation called with lengths %d and %d\n", length1, length2);
+  ESP_LOGD(TAG, "Collation called with lengths %d and %d", length1, length2);
   return length1 - length2;
 }
 
@@ -255,7 +259,7 @@ exit_count:
     rc = sqlite3_prepare_v2(database, "SELECT id, title, artist FROM albums ORDER BY title", -1, &stmt, NULL);
   }
   if (rc != SQLITE_OK) {
-    Serial.printf("Error during preparation: ", sqlite3_errmsg(database));
+    ESP_LOGE(TAG, "Error during preparation code %d", sqlite3_extended_errcode(database));
     goto exit_data;
   }
   index = 0;
