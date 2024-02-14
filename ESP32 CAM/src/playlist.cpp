@@ -26,10 +26,14 @@ void Playlist::setReady(EventBits_t flag) {
   setFlags();
 }
 
-void Playlist::put(Track *ptrack) {
+void Playlist::put(Track *ptrack, int count) {
+  int n;
+
   if (xSemaphoreTake(mutex, pdMS_TO_TICKS(2000)) == pdTRUE) {
-    playlist.push(*ptrack);
-    ESP_LOGD(TAG, "Track added to playlist: %s", ptrack->title);
+    for (n = 0; n < count; n++) {
+      playlist.push(ptrack[n]);
+      ESP_LOGD(TAG, "Track added to playlist: %s", ptrack[n].title);
+    }
     setFlags();
     xSemaphoreGive(mutex);
   }
@@ -51,22 +55,6 @@ void Playlist::clear() {
       playlist.pop();
     }
     ESP_LOGD(TAG, "Playlist cleared");
-    setFlags();
-    xSemaphoreGive(mutex);
-  }
-}
-
-void Playlist::set(Track *ptrack, int count) {
-  int n;
-
-  if (xSemaphoreTake(mutex, pdMS_TO_TICKS(2000)) == pdTRUE) {
-    while (playlist.size() > 0) {
-      playlist.pop();
-    }
-    for (n = 0; n < count; n++) {
-      playlist.push(ptrack[n]);
-      ESP_LOGD(TAG, "Track added to playlist: %s", ptrack[n].title);
-    }
     setFlags();
     xSemaphoreGive(mutex);
   }

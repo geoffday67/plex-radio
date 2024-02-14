@@ -4,6 +4,7 @@
 
 #include "../data/data.h"
 #include "../player.h"
+#include "Menu.h"
 #include "Tracks.h"
 
 classAlbums Albums;
@@ -48,7 +49,7 @@ bool classAlbums::onEvent(Event *pevent) {
     case EVENT_PLAY:
       handlePlayEvent((PlayEvent *)pevent);
       break;
-      case EVENT_BACK:
+    case EVENT_BACK:
       handleBackEvent((BackEvent *)pevent);
       break;
   }
@@ -83,13 +84,19 @@ void classAlbums::handlePlayEvent(PlayEvent *pevent) {
     Album *palbum = palbums + current;
     Serial.printf("Play pressed on album %s\n", palbum->title);
     count = Data.getTracks(palbum->id, &ptracks);
-    Player::pPlaylist->set(ptracks, count);
+    Player::playTracks(ptracks, count);
   }
 }
 
 void classAlbums::handleBackEvent(BackEvent *pevent) {
   if (pevent->pressed) {
-    Player::skipToNext();
+    Serial.println("Back pressed");
+    if (palbums) {
+      delete[] palbums;
+      palbums = NULL;
+    }
+    this->deactivate();
+    Menu.activate();
   }
 }
 

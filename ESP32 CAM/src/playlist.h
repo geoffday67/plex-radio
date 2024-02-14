@@ -20,8 +20,7 @@ class Playlist {
   Playlist(EventGroupHandle_t eventGroup);
   void setReady(EventBits_t);
 
-  void put(Track *);
+  void put(Track *, int);
   void get(Track *);
   void clear();
-  void set(Track *ptrack, int count);
 };

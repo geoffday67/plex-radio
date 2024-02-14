@@ -16,6 +16,7 @@ class classTracks : public Screen, EventReceiver {
   void handleEncoderEvent(EncoderEvent *);
   void handleSwitchEvent(SwitchEvent *);
   void handleBackEvent(BackEvent *);
+  void handlePlayEvent(PlayEvent *);
   Scroll *pscroll1, *pscroll2;
 
  public:

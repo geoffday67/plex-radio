@@ -12,6 +12,7 @@ void classMenu::activate() {
   EventManager.addListener(EVENT_ENCODER, this);
   EventManager.addListener(EVENT_SWITCH, this);
 
+  Output.clear();
   current = 0;
   showCurrent();
 }

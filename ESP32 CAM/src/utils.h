@@ -1,3 +1,6 @@
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 #define MIN(X, Y) ((X) < (Y) ? (X) : (Y))
 
 enum SortOrder {

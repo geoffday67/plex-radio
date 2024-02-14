@@ -9,6 +9,7 @@
 #include <regex>
 
 #include "buttons/play.h"
+#include "buttons/stop.h"
 #include "constants.h"
 #include "data/data.h"
 #include "dlna/dlna.h"
@@ -31,22 +32,11 @@
 
 #define BACK_BUTTON 33
 
-#define STOP_BUTTON 26
-#define STOP_LIGHT 27
-
 static const char *TAG = "MAIN";
 
 EventGroupHandle_t plexRadioGroup;
 ESP32Wifi network;
 Rotary encoder(ENCODER_CLK, ENCODER_DT, ENCODER_BUTTON);
-
-void showStop(bool show) {
-  if (show) {
-    digitalWrite(STOP_LIGHT, HIGH);
-  } else {
-    digitalWrite(STOP_LIGHT, LOW);
-  }
-}
 
 int getEncoder() {
   return digitalRead(ENCODER_BUTTON);
@@ -94,9 +84,9 @@ void wifiTask(void *pparams) {
 
   bits = xEventGroupWaitBits(plexRadioGroup, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, pdMS_TO_TICKS(10000));
   if ((bits & WIFI_CONNECTED_BIT) == 0) {
-    PlayButton::setState(PlayButton::State::Off);
+    PlayButton::setState(Button::State::Off);
   } else {
-    PlayButton::setState(PlayButton::State::On);
+    PlayButton::setState(Button::State::On);
   }
   vTaskDelete(NULL);
 }
@@ -136,14 +126,14 @@ void ringTest() {
 
   check("Space", 5, ring.room());
   check("Available", 0, ring.available());
-  check ("Threshold flag", 0, xEventGroupGetBits(plexRadioGroup) & threshold);
-  check ("Room flag", room, xEventGroupGetBits(plexRadioGroup) & room);
+  check("Threshold flag", 0, xEventGroupGetBits(plexRadioGroup) & threshold);
+  check("Room flag", room, xEventGroupGetBits(plexRadioGroup) & room);
 
   ring.put(data, 3);
   check("Space", 2, ring.room());
   check("Available", 3, ring.available());
-  check ("Threshold flag", threshold, xEventGroupGetBits(plexRadioGroup) & threshold);
-  check ("Room flag", room, xEventGroupGetBits(plexRadioGroup) & room);
+  check("Threshold flag", threshold, xEventGroupGetBits(plexRadioGroup) & threshold);
+  check("Room flag", room, xEventGroupGetBits(plexRadioGroup) & room);
 
   ring.get(buffer, 3);
   check("Fetch 1", 1, buffer[0]);
@@ -151,36 +141,36 @@ void ringTest() {
   check("Fetch 3", 3, buffer[2]);
   check("Space", 5, ring.room());
   check("Available", 0, ring.available());
-  check ("Threshold flag", 0, xEventGroupGetBits(plexRadioGroup) & threshold);
-  check ("Room flag", room, xEventGroupGetBits(plexRadioGroup) & room);
+  check("Threshold flag", 0, xEventGroupGetBits(plexRadioGroup) & threshold);
+  check("Room flag", room, xEventGroupGetBits(plexRadioGroup) & room);
 
   ring.put(data, 5);
   check("Space", 0, ring.room());
   check("Available", 5, ring.available());
-  check ("Threshold flag", threshold, xEventGroupGetBits(plexRadioGroup) & threshold);
-  check ("Room flag", 0, xEventGroupGetBits(plexRadioGroup) & room);
+  check("Threshold flag", threshold, xEventGroupGetBits(plexRadioGroup) & threshold);
+  check("Room flag", 0, xEventGroupGetBits(plexRadioGroup) & room);
 
   ring.get(buffer, 5);
   check("Fetch 1", 1, buffer[0]);
   check("Fetch 5", 5, buffer[4]);
   check("Space", 5, ring.room());
   check("Available", 0, ring.available());
-  check ("Threshold flag", 0, xEventGroupGetBits(plexRadioGroup) & threshold);
-  check ("Room flag", room, xEventGroupGetBits(plexRadioGroup) & room);
+  check("Threshold flag", 0, xEventGroupGetBits(plexRadioGroup) & threshold);
+  check("Room flag", room, xEventGroupGetBits(plexRadioGroup) & room);
 
   ring.put(data, 2);
   check("Space", 3, ring.room());
   check("Available", 2, ring.available());
-  check ("Threshold flag", 0, xEventGroupGetBits(plexRadioGroup) & threshold);
-  check ("Room flag", room, xEventGroupGetBits(plexRadioGroup) & room);
+  check("Threshold flag", 0, xEventGroupGetBits(plexRadioGroup) & threshold);
+  check("Room flag", room, xEventGroupGetBits(plexRadioGroup) & room);
 
   ring.get(buffer, 2);
   check("Fetch 1", 1, buffer[0]);
   check("Fetch 2", 2, buffer[1]);
   check("Space", 5, ring.room());
   check("Available", 0, ring.available());
-  check ("Threshold flag", 0, xEventGroupGetBits(plexRadioGroup) & threshold);
-  check ("Room flag", room, xEventGroupGetBits(plexRadioGroup) & room);
+  check("Threshold flag", 0, xEventGroupGetBits(plexRadioGroup) & threshold);
+  check("Room flag", room, xEventGroupGetBits(plexRadioGroup) & room);
 }
 
 void setup() {
@@ -223,13 +213,14 @@ void setup() {
 
   pinMode(PLAY_BUTTON, INPUT);
   pPlayDebouncer = new Debouncer(getPlayValue, playChanged, 100);
-  PlayButton::begin(PlayButton::State::Flashing);  // Flash while we connect WiFi.
+  PlayButton::begin();
+  PlayButton::setState(Button::State::Flashing);  // Flash while we connect WiFi.
   Serial.println("Play button initialised");
 
   pinMode(STOP_BUTTON, INPUT);
-  pinMode(STOP_LIGHT, OUTPUT);
-  showStop(true);
   pStopDebouncer = new Debouncer(getStopValue, stopChanged, 100);
+  StopButton::begin();
+  StopButton::setState(Button::State::On);
   Serial.println("Stop button initialised");
 
   memset(&spi_config, 0, sizeof spi_config);

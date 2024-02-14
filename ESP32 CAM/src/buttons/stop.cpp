@@ -1,9 +1,9 @@
-#include "play.h"
+#include "stop.h"
 #include "pins.h"
 
-namespace PlayButton {
+namespace StopButton {
 
-Button button(PLAY_LIGHT);
+Button button(STOP_LIGHT);
 
 void setState(Button::State state) {
   button.setState(state);
@@ -13,4 +13,4 @@ void begin() {
   button.begin(Button::State::Off);
 }
 
-}  // namespace PlayButton
+}  // namespace StopButton

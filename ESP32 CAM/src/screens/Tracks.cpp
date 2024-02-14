@@ -18,6 +18,7 @@ void classTracks::activate() {
   EventManager.addListener(EVENT_ENCODER, this);
   EventManager.addListener(EVENT_SWITCH, this);
   EventManager.addListener(EVENT_BACK, this);
+  EventManager.addListener(EVENT_PLAY, this);
 
   count = Data.getTracks(pAlbum->id, &ptracks);
   current = 0;
@@ -45,6 +46,9 @@ bool classTracks::onEvent(Event *pevent) {
     case EVENT_SWITCH:
       handleSwitchEvent((SwitchEvent *)pevent);
       break;
+    case EVENT_PLAY:
+      handlePlayEvent((PlayEvent *)pevent);
+      break;
     case EVENT_BACK:
       handleBackEvent((BackEvent *)pevent);
       break;
@@ -63,6 +67,14 @@ void classTracks::handleSwitchEvent(SwitchEvent *pevent) {
   if (pevent->pressed) {
     Track *ptrack = ptracks + current;
     Serial.printf("Encoder pressed on track %s\n", ptrack->title);
+    Player::playTrack(ptrack);
+  }
+}
+
+void classTracks::handlePlayEvent(PlayEvent *pevent) {
+  if (pevent->pressed) {
+    Track *ptrack = ptracks + current;
+    Serial.printf("Play pressed on track %s\n", ptrack->title);
     Player::playTrack(ptrack);
   }
 }

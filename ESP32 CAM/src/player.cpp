@@ -1,6 +1,7 @@
 #include "player.h"
 
 #include "buttons/play.h"
+#include "buttons/stop.h"
 #include "constants.h"
 #include "driver/gpio.h"
 #include "esp32-hal-log.h"
@@ -32,13 +33,13 @@ namespace Player {
 #define ROOM_AVAILABLE 0x0008
 #define BUFFER_EMPTY 0x0010
 #define FETCH_COMPLETE 0x0020
+#define NOT_PAUSED 0x0040
 
 VS1053b *pVS1053b;
 
 EventGroupHandle_t eventGroup;
 
 RingBuffer *pRing;
-bool paused, stopShowing;
 Playlist *pPlaylist;
 
 void mute(bool mute) {
@@ -55,9 +56,12 @@ void playTask(void *pparms) {
   while (1) {
     // Wait for 32 bytes of sound data to be available.
     // TODO Use timeout and report error.
-    xEventGroupWaitBits(eventGroup, DATA_AVAILABLE, CLEAR_ON_EXIT, WAIT_ALL, portMAX_DELAY);
-    pRing->get(buffer, 32);
+    xEventGroupWaitBits(eventGroup, DATA_AVAILABLE | NOT_PAUSED, NO_CLEAR, WAIT_ALL, portMAX_DELAY);
 
+    // Clear the flag separately as we don't want to clear the pause flag too.
+    xEventGroupClearBits(eventGroup, DATA_AVAILABLE);
+
+    pRing->get(buffer, 32);
     pVS1053b->sendChunk(buffer, 32);
   }
 }
@@ -82,7 +86,7 @@ void fetchTask(void *pparam) {
     pPlaylist->get(&track);
     xEventGroupClearBits(eventGroup, STOP_PLAY);
     xEventGroupClearBits(eventGroup, FETCH_COMPLETE);
-    PlayButton::setState(PlayButton::State::Flashing);
+    PlayButton::setState(Button::State::Flashing);
 
     wifiWait();
     ESP_LOGI(TAG, "WiFi connected for playing %s", track.resource);
@@ -101,16 +105,16 @@ void fetchTask(void *pparam) {
       ESP_LOGI(TAG, "Status code %d, content length %d", code, length);
     } while (code != 200);
 
-    PlayButton::setState(PlayButton::State::On);
+    PlayButton::setState(Button::State::On);
 
-  done = false;
+    done = false;
     while (!done) {
       // TODO Use timeout and report error.
       // TODO Ideally interrupt a blocking HTTP read.
       count = esp_http_client_read(httpClient, (char *)pbuffer, 10240);
       if (xEventGroupGetBits(eventGroup) & STOP_PLAY) {
         break;
-      }      
+      }
       if (count == 0) {
         break;
       }
@@ -142,42 +146,30 @@ void skipToNext() {
   pRing->clear();
 }
 
-void playTrack(Track *ptrack) {
+void playTracks(Track *ptrack, int count) {
   pPlaylist->clear();
   xEventGroupSetBits(eventGroup, STOP_PLAY);
   xEventGroupWaitBits(eventGroup, FETCH_COMPLETE, NO_CLEAR, WAIT_ONE, portMAX_DELAY);
   pRing->clear();
-  pPlaylist->put(ptrack);
+  pPlaylist->put(ptrack, count);
 }
 
-void pausePlay(bool pause) {
-  if (pause) {
-    // Stop the playing task, the fetch task will evetually block too if it's running.
-    // stopPlayTask();
-  } else {
-    // Start the playing task, the fetch task will unblock when it can and add to the buffer again if it's still running.
-    // startPlayTask();
-  }
+void playTrack(Track *ptrack) {
+  playTracks(ptrack, 1);
 }
 
 void stopButtonTask(void *pparams) {
-  uint16_t e;
-
   while (1) {
-    if (xEventGroupWaitBits(plexRadioGroup, STOP_BIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(500)) & STOP_BIT) {
-      paused = !paused;
-      if (paused) {
-        stopShowing = false;
-        showStop(false);
-      }
-      Player::pausePlay(paused);
-      continue;
-    }
-
-    // We timed out, toggle the indicator if we're currently pausing.
-    if (paused) {
-      stopShowing = !stopShowing;
-      showStop(stopShowing);
+    // Setting "clear on exit" here makes pause work but means anyone else watching for the stopbutton might not see it.
+    xEventGroupWaitBits(plexRadioGroup, STOP_BIT, CLEAR_ON_EXIT, WAIT_ALL, portMAX_DELAY);
+    if (xEventGroupGetBits(eventGroup) & NOT_PAUSED) {
+      StopButton::setState(Button::State::Flashing);
+      xEventGroupClearBits(eventGroup, NOT_PAUSED);
+      ESP_LOGI(TAG, "Paused");
+    } else {
+      StopButton::setState(Button::State::On);
+      xEventGroupSetBits(eventGroup, NOT_PAUSED);
+      ESP_LOGI(TAG, "Unpaused");
     }
   }
 }
@@ -202,6 +194,7 @@ bool begin() {
   // gpio_set_direction((gpio_num_t)AUDIO_MUTE, GPIO_MODE_OUTPUT);
 
   xEventGroupSetBits(eventGroup, FETCH_COMPLETE);
+  xEventGroupSetBits(eventGroup, NOT_PAUSED);
 
   startTask(playTask, "play");
   startTask(fetchTask, "fetch");
