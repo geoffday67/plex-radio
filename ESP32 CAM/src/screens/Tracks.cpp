@@ -5,6 +5,7 @@
 #include "../data/data.h"
 #include "../player.h"
 #include "Albums.h"
+#include "buttons/play.h"
 
 classTracks Tracks;
 
@@ -28,6 +29,7 @@ void classTracks::activate() {
   pscroll2 = 0;
 
   showCurrent();
+  PlayButton::setState(Button::State::On);
 }
 
 void classTracks::deactivate() {
@@ -65,6 +67,7 @@ void classTracks::handleEncoderEvent(EncoderEvent *pevent) {
 
 void classTracks::handleSwitchEvent(SwitchEvent *pevent) {
   if (pevent->pressed) {
+    PlayButton::setState(Button::State::Flashing);
     Track *ptrack = ptracks + current;
     Serial.printf("Encoder pressed on track %s\n", ptrack->title);
     Player::playTrack(ptrack);
@@ -73,6 +76,7 @@ void classTracks::handleSwitchEvent(SwitchEvent *pevent) {
 
 void classTracks::handlePlayEvent(PlayEvent *pevent) {
   if (pevent->pressed) {
+    PlayButton::setState(Button::State::Flashing);
     Track *ptrack = ptracks + current;
     Serial.printf("Play pressed on track %s\n", ptrack->title);
     Player::playTrack(ptrack);

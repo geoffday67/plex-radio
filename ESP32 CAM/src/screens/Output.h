@@ -26,6 +26,7 @@ class classOutput {
   virtual void addChar(int x, int y, char c);
   virtual void setLine(int y, const char *ptext);
   virtual void clear();
+  virtual void centreText(int y, const char *ptext);
 };
 
 extern classOutput Output;

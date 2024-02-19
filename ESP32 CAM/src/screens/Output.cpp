@@ -62,6 +62,16 @@ void classOutput::setLine(int y, const char *ptext) {
   addText(0, y, line);
 }
 
+void classOutput::centreText(int y, const char *ptext) {
+  char line[OUTPUT_WIDTH + 1];
+  int padding = (OUTPUT_WIDTH - strlen(ptext)) / 2;
+
+  memset(line, ' ', OUTPUT_WIDTH);
+  line[OUTPUT_WIDTH] = 0;
+  memcpy(line + padding, ptext, strlen(ptext));
+  addText(0, y, line);
+}
+
 void classOutput::clear() {
   if (xSemaphoreTake(mutex, 2000 * portTICK_PERIOD_MS) == pdTRUE) {
     pdisplay->clear();

@@ -6,6 +6,8 @@
 #include "Albums.h"
 #include "../data/refresh.h"
 
+extern void restart();
+
 classMenu Menu;
 
 void classMenu::activate() {
@@ -13,6 +15,7 @@ void classMenu::activate() {
   EventManager.addListener(EVENT_SWITCH, this);
 
   Output.clear();
+  Output.centreText(0, "Plex Radio");
   current = 0;
   showCurrent();
 }
@@ -50,12 +53,12 @@ void classMenu::handleSwitchEvent(SwitchEvent *pevent) {
 
   switch (current) {
     case 0:
-      Settings.setSortOrder(Artist);
+      Settings.setSortOrder(Title);
       Albums.activate();
       deactivate();
       break;
     case 1:
-      Settings.setSortOrder(Title);
+      Settings.setSortOrder(Artist);
       Albums.activate();
       deactivate();
       break;
@@ -63,7 +66,7 @@ void classMenu::handleSwitchEvent(SwitchEvent *pevent) {
       Refresh::fetchAll();
 
       // Restart to ensure the database is stable.
-      ESP.restart();
+      restart();
       
       break;
   }
@@ -72,23 +75,13 @@ void classMenu::handleSwitchEvent(SwitchEvent *pevent) {
 void classMenu::showCurrent() {
   switch (current) {
     case 0:
-      Output.setLine(0, "Albums by artist");
+      Output.centreText(1, "Albums by title");
       break;
     case 1:
-      Output.setLine(0, "Albums by title");
+      Output.centreText(1, "Albums by artist");
       break;
     case 2:
-      Output.setLine(0, "Refresh data");
+      Output.centreText(1, "Refresh data");
       break;
-  }
-  if (current > 0) {
-    Output.addChar(0, 1, LEFT_ARROW);
-  } else {
-    Output.addChar(0, 1, ' ');
-  }
-  if (current < max) {
-    Output.addChar(15, 1, RIGHT_ARROW);
-  } else {
-    Output.addChar(15, 1, ' ');
   }
 }

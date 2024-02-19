@@ -14,6 +14,7 @@ class classData {
 
  public:
   bool begin();
+  void close();
   void clearAll();
 
   bool beginStoreTracks();

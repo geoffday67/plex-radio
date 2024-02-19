@@ -79,6 +79,13 @@ void stopChanged(int value) {
 
 Debouncer *pStopDebouncer;
 
+void restart() {
+  network.stop();
+  Data.close();
+  delay(1000);
+  ESP.restart();
+}
+
 void wifiTask(void *pparams) {
   EventBits_t bits;
 

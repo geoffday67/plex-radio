@@ -3,6 +3,7 @@
 #include <memory.h>
 
 #include "esp32-hal-log.h"
+#include "utils.h"
 
 static const char *TAG = "RingBuffer";
 
@@ -15,6 +16,7 @@ RingBuffer::RingBuffer(int size, EventGroupHandle_t eventGroup) {
   thresholdFlag = 0;
   roomFlag = 0;
   emptyFlag = 0;
+  notEmptyFlag = 0;
 
   head = 0;
   tail = 0;
@@ -44,6 +46,11 @@ void RingBuffer::setEmpty(EventBits_t flag) {
   setFlags();
 }
 
+void RingBuffer::setNotEmpty(EventBits_t flag) {
+  this->notEmptyFlag = flag;
+  setFlags();
+}
+
 void RingBuffer::setFlags() {
   if (thresholdFlag != 0 && used >= thresholdAmount) {
     xEventGroupSetBits(eventGroup, thresholdFlag);
@@ -61,6 +68,12 @@ void RingBuffer::setFlags() {
     xEventGroupSetBits(eventGroup, emptyFlag);
   } else {
     xEventGroupClearBits(eventGroup, emptyFlag);
+  }
+
+  if (notEmptyFlag != 0 && used > 0) {
+    xEventGroupSetBits(eventGroup, notEmptyFlag);
+  } else {
+    xEventGroupClearBits(eventGroup, notEmptyFlag);
   }
 }
 
@@ -89,7 +102,9 @@ void RingBuffer::put(uint8_t *pdata, int count) {
   }
 }
 
-void RingBuffer::get(uint8_t *pdata, int count) {
+void RingBuffer::get(uint8_t *pdata, int max) {
+    int count = MIN(used, max);
+
   if (xSemaphoreTake(mutex, pdMS_TO_TICKS(2000)) == pdTRUE) {
     // tailSpace = the maximum amount directly after "tail" without wrapping.
     int tailSpace = size - tail;

@@ -6,6 +6,7 @@
 #include "../player.h"
 #include "Menu.h"
 #include "Tracks.h"
+#include "buttons/play.h"
 
 classAlbums Albums;
 
@@ -68,6 +69,7 @@ void classAlbums::handleEncoderEvent(EncoderEvent *pevent) {
 
 void classAlbums::handleSwitchEvent(SwitchEvent *pevent) {
   if (pevent->pressed) {
+    PlayButton::setState(Button::State::Flashing);
     Album *palbum = palbums + current;
     Serial.printf("Encoder pressed on album %s\n", palbum->title);
     this->deactivate();
@@ -81,6 +83,7 @@ void classAlbums::handlePlayEvent(PlayEvent *pevent) {
   Track *ptracks;
 
   if (pevent->pressed) {
+    PlayButton::setState(Button::State::Flashing);
     Album *palbum = palbums + current;
     Serial.printf("Play pressed on album %s\n", palbum->title);
     count = Data.getTracks(palbum->id, &ptracks);

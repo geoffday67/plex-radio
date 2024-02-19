@@ -34,6 +34,7 @@ namespace Player {
 #define BUFFER_EMPTY 0x0010
 #define FETCH_COMPLETE 0x0020
 #define NOT_PAUSED 0x0040
+#define NOT_EMPTY 0x0080
 
 VS1053b *pVS1053b;
 
@@ -56,10 +57,10 @@ void playTask(void *pparms) {
   while (1) {
     // Wait for 32 bytes of sound data to be available.
     // TODO Use timeout and report error.
-    xEventGroupWaitBits(eventGroup, DATA_AVAILABLE | NOT_PAUSED, NO_CLEAR, WAIT_ALL, portMAX_DELAY);
+    xEventGroupWaitBits(eventGroup, NOT_EMPTY | NOT_PAUSED, NO_CLEAR, WAIT_ALL, portMAX_DELAY);
 
     // Clear the flag separately as we don't want to clear the pause flag too.
-    xEventGroupClearBits(eventGroup, DATA_AVAILABLE);
+    xEventGroupClearBits(eventGroup, NOT_EMPTY);
 
     pRing->get(buffer, 32);
     pVS1053b->sendChunk(buffer, 32);
@@ -67,7 +68,7 @@ void playTask(void *pparms) {
 }
 
 void fetchTask(void *pparam) {
-  int length, count, sent, code, chunk;
+  int length, count, sent, code, chunk, result;
   bool done;
   esp_http_client_config_t httpConfig;
   esp_http_client_handle_t httpClient;
@@ -86,7 +87,6 @@ void fetchTask(void *pparam) {
     pPlaylist->get(&track);
     xEventGroupClearBits(eventGroup, STOP_PLAY);
     xEventGroupClearBits(eventGroup, FETCH_COMPLETE);
-    PlayButton::setState(Button::State::Flashing);
 
     wifiWait();
     ESP_LOGI(TAG, "WiFi connected for playing %s", track.resource);
@@ -97,13 +97,42 @@ void fetchTask(void *pparam) {
     httpConfig.method = HTTP_METHOD_GET;
     httpClient = esp_http_client_init(&httpConfig);
 
-    // TODO If status code is not 200 then retry, ideally warning user. If it fails consistently, or if read fails later, then abort play?
-    do {
-      esp_http_client_open(httpClient, 0);
+    esp_http_client_set_timeout_ms(httpClient, 10000);
+
+    while (1) {
+      result = esp_http_client_open(httpClient, 0);
+      if (result != ESP_OK) {
+        ESP_LOGE(TAG, "Error %d during esp_http_open", result);
+        goto retry_connect;
+      }
+
       length = esp_http_client_fetch_headers(httpClient);
+      if (length == 0) {
+        ESP_LOGE(TAG, "Zero content length returned");
+        goto retry_connect;
+      }
+      if (length == -ESP_ERR_HTTP_EAGAIN) {
+        ESP_LOGE(TAG, "Timeout during esp_http_client_fetch_headers");
+        goto retry_connect;
+      }
+      if (length == ESP_FAIL) {
+        ESP_LOGE(TAG, "Error during esp_http_client_fetch_headers");
+        goto retry_connect;
+      }
+
       code = esp_http_client_get_status_code(httpClient);
-      ESP_LOGI(TAG, "Status code %d, content length %d", code, length);
-    } while (code != 200);
+      if (code == 200) {
+        ESP_LOGI(TAG, "Status code %d, content length %d", code, length);
+        break;
+      } else {
+        ESP_LOGE(TAG, "Status code %d received", code);
+      }
+
+    retry_connect:
+      // TODO Error reporting and retry count/abort.
+      esp_http_client_close(httpClient);
+      vTaskDelay(1000);
+    }
 
     PlayButton::setState(Button::State::On);
 
@@ -160,7 +189,7 @@ void playTrack(Track *ptrack) {
 
 void stopButtonTask(void *pparams) {
   while (1) {
-    // Setting "clear on exit" here makes pause work but means anyone else watching for the stopbutton might not see it.
+    // Setting "clear on exit" here makes pause work but means anyone else watching for the stop button might not see it.
     xEventGroupWaitBits(plexRadioGroup, STOP_BIT, CLEAR_ON_EXIT, WAIT_ALL, portMAX_DELAY);
     if (xEventGroupGetBits(eventGroup) & NOT_PAUSED) {
       StopButton::setState(Button::State::Flashing);
@@ -190,6 +219,7 @@ bool begin() {
   pRing->setThreshold(32, DATA_AVAILABLE);
   pRing->setRoom(10240, ROOM_AVAILABLE);
   pRing->setEmpty(BUFFER_EMPTY);
+  pRing->setNotEmpty(NOT_EMPTY);
 
   // gpio_set_direction((gpio_num_t)AUDIO_MUTE, GPIO_MODE_OUTPUT);
 

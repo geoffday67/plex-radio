@@ -12,7 +12,7 @@ class RingBuffer {
 
   int size, used, head, tail;
   int thresholdAmount, roomAmount;
-  EventBits_t thresholdFlag, roomFlag, emptyFlag;
+  EventBits_t thresholdFlag, roomFlag, emptyFlag, notEmptyFlag;
 
   void setFlags();
 
@@ -23,6 +23,7 @@ class RingBuffer {
   void setThreshold(int, EventBits_t);
   void setRoom(int, EventBits_t);
   void setEmpty(EventBits_t);
+  void setNotEmpty(EventBits_t);
 
   void put(uint8_t *pdata, int count);
   void get(uint8_t *pdata, int count);
