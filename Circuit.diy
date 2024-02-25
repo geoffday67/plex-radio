@@ -38,9 +38,9 @@
       <name>J1</name>
       <alpha>127</alpha>
       <points>
-        <point x="2.0" y="2.5"/>
-        <point x="2.0" y="2.3"/>
-        <point x="2.0" y="2.4"/>
+        <point x="2.3" y="2.5"/>
+        <point x="2.3" y="2.3"/>
+        <point x="2.3" y="2.4"/>
       </points>
       <bodyColor hex="ffffff"/>
       <borderColor hex="000000"/>
@@ -1313,6 +1313,63 @@
       </controlPoints>
       <rowCount>1</rowCount>
       <columnCount>3</columnCount>
+      <spacing value="0.1" unit="in"/>
+      <shrouded>false</shrouded>
+      <bodyColor hex="808080"/>
+      <shroudColor hex="595959"/>
+    </diylc.electromechanical.PinHeader>
+    <diylc.shapes.Ellipse>
+      <name>ELL1</name>
+      <alpha>127</alpha>
+      <value></value>
+      <controlPoints>
+        <point x="2.0" y="2.4"/>
+        <point x="2.2" y="2.6"/>
+      </controlPoints>
+      <firstPoint x="2.0" y="2.4"/>
+      <secondPoint x="2.2" y="2.6"/>
+      <color hex="ffffff"/>
+      <borderColor hex="000000"/>
+      <borderThickness value="0.2" unit="mm"/>
+    </diylc.shapes.Ellipse>
+    <diylc.shapes.Ellipse>
+      <name>ELL2</name>
+      <alpha>127</alpha>
+      <value></value>
+      <controlPoints>
+        <point x="3.5" y="0.3"/>
+        <point x="3.7" y="0.5"/>
+      </controlPoints>
+      <firstPoint x="3.5" y="0.3"/>
+      <secondPoint x="3.7" y="0.5"/>
+      <color hex="ffffff"/>
+      <borderColor hex="000000"/>
+      <borderThickness value="0.2" unit="mm"/>
+    </diylc.shapes.Ellipse>
+    <diylc.shapes.Ellipse>
+      <name>ELL3</name>
+      <alpha>127</alpha>
+      <value></value>
+      <controlPoints>
+        <point x="0.6" y="1.3"/>
+        <point x="0.8" y="1.5"/>
+      </controlPoints>
+      <firstPoint x="0.6" y="1.3"/>
+      <secondPoint x="0.8" y="1.5"/>
+      <color hex="ffffff"/>
+      <borderColor hex="000000"/>
+      <borderThickness value="0.2" unit="mm"/>
+    </diylc.shapes.Ellipse>
+    <diylc.electromechanical.PinHeader>
+      <name>PH9</name>
+      <alpha>127</alpha>
+      <orientation>DEFAULT</orientation>
+      <controlPoints>
+        <point x="3.1" y="2.4"/>
+        <point x="3.1" y="2.5"/>
+      </controlPoints>
+      <rowCount>1</rowCount>
+      <columnCount>2</columnCount>
       <spacing value="0.1" unit="in"/>
       <shrouded>false</shrouded>
       <bodyColor hex="808080"/>
